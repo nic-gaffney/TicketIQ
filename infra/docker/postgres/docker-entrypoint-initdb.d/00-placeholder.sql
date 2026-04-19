@@ -1,0 +1,5 @@
+-- Optional bootstrap SQL (extensions, roles). Application tables are created by the API on startup.
+--
+-- Compose mounts this whole directory onto Postgres `/docker-entrypoint-initdb.d/`.
+-- Do not bind-mount a single missing file path (e.g. `init.sql`); Docker can create a root-owned
+-- directory with that name instead of a file.

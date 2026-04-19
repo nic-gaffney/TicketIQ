@@ -9,7 +9,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-appdb}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./infra/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      # Bind-mount a directory that exists in git. Mounting a missing file path makes Docker create a *directory* with that name (root-owned), which breaks Postgres init.
+      - ./infra/docker/postgres/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
     ports:
       - "5432:5432"
     healthcheck:
@@ -45,6 +46,8 @@ services:
       target: development
     container_name: app_frontend
     restart: unless-stopped
+    environment:
+      VITE_PROXY_TARGET: http://backend:8000
     env_file:
       - .env
     volumes:

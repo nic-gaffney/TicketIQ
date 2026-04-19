@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +15,10 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: list[str] = ["http://localhost:5173"]
 
     DATABASE_URL: str = "postgresql+asyncpg://appuser:apppassword@localhost:5432/appdb"
+
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8
+    UPLOAD_DIR: Path = Path("/tmp/ticketiq_uploads")
+    ESCALATION_JOB_INTERVAL_SECONDS: int = 120
 
     @property
     def is_production(self) -> bool:

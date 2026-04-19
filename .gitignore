@@ -1,7 +1,6 @@
 ### TICKETIQ
 # Environment
 *.tape
-infra/docker
 .env
 .env.local
 .env.*.local

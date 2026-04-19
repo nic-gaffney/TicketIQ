@@ -1,21 +1,51 @@
 from contextlib import asynccontextmanager
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import app.models  # noqa: F401 — register ORM models with Base.metadata
 from app.api.v1.router import api_router
 from app.core.config import settings
-from app.db.session import engine
 from app.db.base import Base
+from app.db.session import AsyncSessionLocal, engine
+from app.services.escalation import run_escalation_check
+from app.services.seed import seed_if_empty
+
+scheduler = AsyncIOScheduler()
+
+
+async def _escalation_tick() -> None:
+    async with AsyncSessionLocal() as session:
+        try:
+            await run_escalation_check(session)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    async with AsyncSessionLocal() as session:
+        await seed_if_empty(session)
+        await session.commit()
+
+    scheduler.add_job(
+        _escalation_tick,
+        "interval",
+        seconds=settings.ESCALATION_JOB_INTERVAL_SECONDS,
+        id="ticketiq_escalation",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.start()
     yield
-    # Shutdown
+    scheduler.shutdown(wait=False)
     await engine.dispose()
 
 
