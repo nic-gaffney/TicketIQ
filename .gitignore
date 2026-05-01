@@ -22,6 +22,8 @@ htmlcov/
 # Node
 node_modules/
 dist/
+.next/
+out/
 .eslintcache
 
 # Docker volumes
