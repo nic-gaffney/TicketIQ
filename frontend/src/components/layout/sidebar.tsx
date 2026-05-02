@@ -61,7 +61,7 @@ export function Sidebar() {
 
   const items = useMemo<NavItem[]>(() => {
     if (!user) return [];
-    if (user.role === "user") {
+    if (user.role === "end_user") {
       return [
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/dashboard", label: "My Tickets", icon: ClipboardList },
@@ -154,11 +154,11 @@ export function Sidebar() {
 
       <div className="border-t border-[var(--border)] p-3">
         <div className={cn("flex items-center gap-3", collapsed && "justify-center")}>
-          <Avatar name={user.name} role={user.role} size="sm" />
+          <Avatar name={user.full_name} role={user.role} size="sm" />
           {!collapsed ? (
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-[var(--text-primary)]">
-                {user.name}
+                {user.full_name}
               </p>
               <Badge variant={roleVariant} className="mt-1 text-[10px]">
                 {user.role}

@@ -132,6 +132,7 @@ async def get_ticket(ticket_id: int, session: DBSession, user: CurrentUser) -> T
     return _ticket_to_out(t, user)
 
 
+
 @router.post("", response_model=TicketOut, status_code=status.HTTP_201_CREATED)
 async def create_ticket(
     session: DBSession,
@@ -182,7 +183,18 @@ async def create_ticket(
             payload={"severity": sev.value, "urgency": urg.value, "priority_score": prio},
         )
     )
-    await session.refresh(ticket, ["submitter", "assignee"])
+    await session.commit()
+
+    # Re-fetch with relationships eager-loaded
+    result = await session.execute(
+        select(Ticket)
+        .where(Ticket.id == ticket.id)
+        .options(
+            selectinload(Ticket.submitter),
+            selectinload(Ticket.assignee),
+        )
+    )
+    ticket = result.scalar_one()
     return _ticket_to_out(ticket, user)
 
 
