@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     SECRET_KEY: str = "changeme"
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:5173"]
+    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000"]
 
     DATABASE_URL: str = "postgresql+asyncpg://appuser:apppassword@localhost:5432/appdb"
 
