@@ -37,7 +37,7 @@ function newId() {
 
 export default function SubmitTicketPage() {
   const { user } = useAuth();
-  const { addTicket } = useTickets();
+  const { createTicket } = useTickets();
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<IssueCategory>("network");
@@ -91,7 +91,7 @@ export default function SubmitTicketPage() {
         region: region || user.region || "Unknown",
         attachments: files.map((f) => f.name),
       };
-      addTicket(t);
+      createTicket(t);
       setResult({ ticketId: id, severity, urgency, score });
       setPhase("done");
     }, 2000);

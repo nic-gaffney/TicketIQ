@@ -4,185 +4,200 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
-import type { AuditLog, Note, Severity, Ticket, TicketStatus } from "@/lib/types";
-import {
-  MOCK_AUDIT_LOGS,
-  MOCK_TICKETS_SEED,
-} from "@/lib/mock-data";
+import createClient from "openapi-fetch";
+import type { paths, components } from "@/lib/api.types";
 
-function cloneTickets(seed: Ticket[]): Ticket[] {
-  return seed.map((t) => ({
-    ...t,
-    internalNotes: t.internalNotes?.map((n) => ({ ...n })),
-    attachments: t.attachments ? [...t.attachments] : undefined,
-  }));
-}
+// ── Convenience aliases ──────────────────────────────────────────────────────
+export type Ticket             = components["schemas"]["TicketOut"];
+export type AuditLog           = components["schemas"]["AuditLogOut"];
+export type TicketStatus       = components["schemas"]["TicketStatus"];
+export type Severity           = components["schemas"]["Severity"];
+export type Urgency            = components["schemas"]["Urgency"];
+export type UserPublic         = components["schemas"]["UserPublic"];
+export type TicketUpdateTech   = components["schemas"]["TicketUpdateTech"];
+export type TicketAdminOverride= components["schemas"]["TicketAdminOverride"];
+export type TicketAssign       = components["schemas"]["TicketAssign"];
 
+// ── API client ───────────────────────────────────────────────────────────────
+import { getStoredToken } from "@/contexts/auth-context";
+
+const apiClient = createClient<paths>({
+  baseUrl: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001",
+  headers: {
+    get Authorization() {
+      const token = getStoredToken();
+      return token ? `Bearer ${token}` : "";
+    },
+  },
+});
+
+
+// ── Context type ─────────────────────────────────────────────────────────────
 export type TicketContextValue = {
-  tickets: Ticket[];
-  auditLogs: AuditLog[];
-  getTicket: (id: string) => Ticket | undefined;
-  addTicket: (t: Ticket) => void;
-  updateTicket: (id: string, patch: Partial<Ticket>) => void;
-  claimTicket: (id: string, technicianId: string) => void;
-  addNote: (ticketId: string, note: Note) => void;
-  addAudit: (log: Omit<AuditLog, "logId" | "timestamp"> & { timestamp?: string }) => void;
-  runAutoEscalation: () => number;
+  tickets:    Ticket[];
+  auditLogs:  AuditLog[];
+  loading:    boolean;
+  error:      string | null;
+  refresh:    () => Promise<void>;
+
+  getTicket:       (id: number) => Ticket | undefined;
+  createTicket:    (body: { description: string; affected_system: string; category: string; region?: string; attachment?: string }) => Promise<Ticket>;
+  updateTicketTech:(id: number, patch: TicketUpdateTech) => Promise<Ticket>;
+  claimTicket:     (id: number) => Promise<Ticket>;
+  assignTicket:    (id: number, assignee_id: number) => Promise<Ticket>;
+  adminOverride:   (id: number, patch: TicketAdminOverride) => Promise<Ticket>;
+  fetchAuditLogs:  (ticket_id?: number) => Promise<AuditLog[]>;
+  runAutoEscalation: () => Promise<void>;
 };
 
 const TicketContext = createContext<TicketContextValue | undefined>(undefined);
 
+// ── Provider ─────────────────────────────────────────────────────────────────
 export function TicketProvider({ children }: { children: React.ReactNode }) {
-  const [tickets, setTickets] = useState<Ticket[]>(() => cloneTickets(MOCK_TICKETS_SEED));
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() =>
-    MOCK_AUDIT_LOGS.map((a) => ({ ...a })),
-  );
+  const [tickets,   setTickets]   = useState<Ticket[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [{ data: t, error: te }, { data: a, error: ae }] = await Promise.all([
+        apiClient.GET("/api/v1/tickets"),
+        apiClient.GET("/api/v1/audit"),
+      ]);
+      if (te) throw new Error(JSON.stringify(te));
+      if (ae) throw new Error(JSON.stringify(ae));
+      setTickets(t ?? []);
+      setAuditLogs(a ?? []);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
 
   const getTicket = useCallback(
-    (id: string) => tickets.find((t) => t.ticketId === id),
+    (id: number) => tickets.find((t) => t.id === id),
     [tickets],
   );
 
-  const addTicket = useCallback((t: Ticket) => {
-    setTickets((prev) => [t, ...prev]);
-  }, []);
-
-  const updateTicket = useCallback((id: string, patch: Partial<Ticket>) => {
-    setTickets((prev) =>
-      prev.map((t) =>
-        t.ticketId === id
-          ? { ...t, ...patch, updatedAt: new Date().toISOString() }
-          : t,
-      ),
-    );
-  }, []);
-
-  const claimTicket = useCallback((id: string, technicianId: string) => {
-    setTickets((prev) =>
-      prev.map((t) =>
-        t.ticketId === id
-          ? {
-              ...t,
-              assignedTo: technicianId,
-              status: (t.status === "open" ? "assigned" : t.status) as TicketStatus,
-              updatedAt: new Date().toISOString(),
-            }
-          : t,
-      ),
-    );
-  }, []);
-
-  const addNote = useCallback((ticketId: string, note: Note) => {
-    setTickets((prev) =>
-      prev.map((t) =>
-        t.ticketId === ticketId
-          ? {
-              ...t,
-              internalNotes: [...(t.internalNotes ?? []), note],
-              updatedAt: new Date().toISOString(),
-            }
-          : t,
-      ),
-    );
-  }, []);
-
-  const addAudit = useCallback(
-    (log: Omit<AuditLog, "logId" | "timestamp"> & { timestamp?: string }) => {
-      const entry: AuditLog = {
-        ...log,
-        logId:
-          typeof crypto !== "undefined" && crypto.randomUUID
-            ? crypto.randomUUID()
-            : `al-${Date.now()}`,
-        timestamp: log.timestamp ?? new Date().toISOString(),
-      };
-      setAuditLogs((prev) => [entry, ...prev]);
-    },
-    [],
-  );
-
-  /** Demo: high severity + open + older than 30m → escalated */
-  const runAutoEscalation = useCallback(() => {
-    const now = Date.now();
-    let count = 0;
-    setTickets((prev) => {
-      const next = prev.map((t) => {
-        if (t.severity !== "high" && t.severity !== "critical") return t;
-        if (t.status !== "open") return t;
-        const created = new Date(t.createdAt).getTime();
-        if (now - created < 30 * 60 * 1000) return t;
-        count += 1;
-        return {
-          ...t,
-          status: "escalated" as const,
-          escalatedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-      });
-      return count ? next : prev;
+  const createTicket = useCallback(async (
+    body: { description: string; affected_system: string; category: string; region?: string; attachment?: string }
+  ): Promise<Ticket> => {
+    const { data, error } = await apiClient.POST("/api/v1/tickets", {
+      // multipart/form-data — openapi-fetch sends FormData automatically
+      body: { ...body, attachment: body.attachment ?? null, region: body.region ?? null },
     });
-    return count;
+    if (error) throw new Error(JSON.stringify(error));
+    setTickets((prev) => [data, ...prev]);
+    return data;
   }, []);
 
-  const value = useMemo(
+  const updateTicketTech = useCallback(async (
+    id: number, patch: TicketUpdateTech
+  ): Promise<Ticket> => {
+    const { data, error } = await apiClient.PATCH(
+      "/api/v1/tickets/{ticket_id}/tech",
+      { params: { path: { ticket_id: id } }, body: patch },
+    );
+    if (error) throw new Error(JSON.stringify(error));
+    setTickets((prev) => prev.map((t) => (t.id === id ? data : t)));
+    return data;
+  }, []);
+
+  const claimTicket = useCallback(async (id: number): Promise<Ticket> => {
+    const { data, error } = await apiClient.POST(
+      "/api/v1/tickets/{ticket_id}/claim",
+      { params: { path: { ticket_id: id } } },
+    );
+    if (error) throw new Error(JSON.stringify(error));
+    setTickets((prev) => prev.map((t) => (t.id === id ? data : t)));
+    return data;
+  }, []);
+
+  const assignTicket = useCallback(async (
+    id: number, assignee_id: number
+  ): Promise<Ticket> => {
+    const { data, error } = await apiClient.POST(
+      "/api/v1/tickets/{ticket_id}/assign",
+      { params: { path: { ticket_id: id } }, body: { assignee_id } },
+    );
+    if (error) throw new Error(JSON.stringify(error));
+    setTickets((prev) => prev.map((t) => (t.id === id ? data : t)));
+    return data;
+  }, []);
+
+  const adminOverride = useCallback(async (
+    id: number, patch: TicketAdminOverride
+  ): Promise<Ticket> => {
+    const { data, error } = await apiClient.PATCH(
+      "/api/v1/tickets/{ticket_id}/admin",
+      { params: { path: { ticket_id: id } }, body: patch },
+    );
+    if (error) throw new Error(JSON.stringify(error));
+    setTickets((prev) => prev.map((t) => (t.id === id ? data : t)));
+    return data;
+  }, []);
+
+  const fetchAuditLogs = useCallback(async (ticket_id?: number): Promise<AuditLog[]> => {
+    const { data, error } = await apiClient.GET("/api/v1/audit", {
+      params: { query: { ticket_id } },
+    });
+    if (error) throw new Error(JSON.stringify(error));
+    setAuditLogs(data);
+    return data;
+  }, []);
+
+  const runAutoEscalation = useCallback(async () => {
+    const { error } = await apiClient.POST(
+      "/api/v1/admin/escalation/run-check",
+    );
+    if (error) throw new Error(JSON.stringify(error));
+    await refresh(); // re-sync tickets after escalation
+  }, [refresh]);
+
+  // ── Value ──────────────────────────────────────────────────────────────────
+
+  const value = useMemo<TicketContextValue>(
     () => ({
-      tickets,
-      auditLogs,
-      getTicket,
-      addTicket,
-      updateTicket,
-      claimTicket,
-      addNote,
-      addAudit,
-      runAutoEscalation,
+      tickets, auditLogs, loading, error, refresh,
+      getTicket, createTicket, updateTicketTech,
+      claimTicket, assignTicket, adminOverride,
+      fetchAuditLogs, runAutoEscalation,
     }),
     [
-      tickets,
-      auditLogs,
-      getTicket,
-      addTicket,
-      updateTicket,
-      claimTicket,
-      addNote,
-      addAudit,
-      runAutoEscalation,
+      tickets, auditLogs, loading, error, refresh,
+      getTicket, createTicket, updateTicketTech,
+      claimTicket, assignTicket, adminOverride,
+      fetchAuditLogs, runAutoEscalation,
     ],
   );
 
-  return (
-    <TicketContext.Provider value={value}>{children}</TicketContext.Provider>
-  );
+  return <TicketContext.Provider value={value}>{children}</TicketContext.Provider>;
 }
 
+// ── Hook ──────────────────────────────────────────────────────────────────────
 export function useTickets() {
   const ctx = useContext(TicketContext);
   if (!ctx) throw new Error("useTickets must be used within TicketProvider");
   return ctx;
 }
 
-/** Admin override with audit */
-export function applySeverityOverride(
+// ── Admin helper (replaces applySeverityOverride) ─────────────────────────────
+export async function applySeverityOverride(
   ctx: TicketContextValue,
-  ticketId: string,
-  actorId: string,
+  ticketId: number,
   newSeverity: Severity,
-  reason?: string,
 ) {
-  const t = ctx.getTicket(ticketId);
-  if (!t) return;
-  const old = `severity:${t.severity}`;
-  const newVal = `severity:${newSeverity}`;
-  ctx.updateTicket(ticketId, { severity: newSeverity });
-  ctx.addAudit({
-    actorId,
-    actorType: "admin",
-    actionType: "override",
-    ticketId,
-    oldValue: old,
-    newValue: newVal,
-    reason,
-  });
+  await ctx.adminOverride(ticketId, { severity: newSeverity });
 }
