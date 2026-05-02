@@ -63,24 +63,27 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [{ data: t, error: te }, { data: a, error: ae }] = await Promise.all([
-        apiClient.GET("/api/v1/tickets"),
-        apiClient.GET("/api/v1/audit"),
-      ]);
-      if (te) throw new Error(JSON.stringify(te));
-      if (ae) throw new Error(JSON.stringify(ae));
-      setTickets(t ?? []);
-      setAuditLogs(a ?? []);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+const refresh = useCallback(async () => {
+  setLoading(true);
+  setError(null);
+  try {
+    const { data: t, error: te } = await apiClient.GET("/api/v1/tickets");
+    if (te) throw new Error(JSON.stringify(te));
+    setTickets(t ?? []);
+  } catch (e: unknown) {
+    setError(e instanceof Error ? e.message : "Failed to load tickets");
+  } finally {
+    setLoading(false);
+  }
+
+  // Audit logs are admin-only — fetch separately and fail silently
+  try {
+    const { data: a } = await apiClient.GET("/api/v1/audit");
+    setAuditLogs(a ?? []);
+  } catch {
+    // not an admin, ignore
+  }
+}, []);
 
   useEffect(() => { refresh(); }, [refresh]);
 

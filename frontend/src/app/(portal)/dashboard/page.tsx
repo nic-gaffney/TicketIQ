@@ -13,6 +13,7 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { PriorityScore } from "@/components/ui/priority-score";
 import { assigneeName, avgResolutionHours } from "@/lib/ticket-helpers";
 import type { IssueCategory, Ticket, TicketStatus } from "@/lib/types";
+import { ticketFromApi, userFromApi } from "@/lib/types";
 import {
   Activity,
   CheckCircle2,
@@ -41,17 +42,23 @@ const categories: IssueCategory[] = [
 ];
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user: rawUser } = useAuth();
+  const user = useMemo(
+    () => rawUser ? userFromApi(rawUser) : null,
+    [rawUser]
+  );
   const router = useRouter();
-  const { tickets } = useTickets();
+  const { tickets: rawTickets } = useTickets();
+  const tickets = rawTickets.map(ticketFromApi);
+  console.log("rawTickets:", rawTickets);
 
   useEffect(() => {
-    if (user?.role === "technician") router.replace("/technician/queue");
+    if (user?.role === "it_support") router.replace("/technician/queue");
     if (user?.role === "admin") router.replace("/admin/overview");
   }, [user, router]);
 
   const mine = useMemo(
-    () => tickets.filter((t) => t.submittedBy === user?.userId),
+    () => tickets.filter((t) => String(t.submittedBy) === String(user?.userId)),
     [tickets, user?.userId],
   );
 
@@ -159,7 +166,7 @@ export default function DashboardPage() {
     },
   ];
 
-  if (!user || user.role !== "user") {
+  if (!user || user.role !== "end_user") {
     return (
       <div className="flex min-h-[40vh] items-center justify-center text-[var(--text-secondary)]">
         Redirecting…
