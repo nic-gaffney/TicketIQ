@@ -10,7 +10,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import { assigneeName, avgResolutionHours } from "@/lib/ticket-helpers";
-import type { Ticket } from "@/lib/types";
+import { ticketFromApi, type Ticket } from "@/lib/types";
 
 type Row = Ticket & { id: string };
 
@@ -19,18 +19,23 @@ export default function EscalatedPage() {
   const { tickets, claimTicket } = useTickets();
   const router = useRouter();
 
+  const ticketsUi = useMemo(() => tickets.map(ticketFromApi), [tickets]);
+
   const esc = useMemo(
-    () => tickets.filter((t) => t.status === "escalated").sort((a, b) => {
-      const ta = new Date(a.escalatedAt ?? a.updatedAt).getTime();
-      const tb = new Date(b.escalatedAt ?? b.updatedAt).getTime();
-      return ta - tb;
-    }),
-    [tickets],
+    () =>
+      ticketsUi
+        .filter((t) => t.status === "escalated")
+        .sort((a, b) => {
+          const ta = new Date(a.escalatedAt ?? a.updatedAt).getTime();
+          const tb = new Date(b.escalatedAt ?? b.updatedAt).getTime();
+          return ta - tb;
+        }),
+    [ticketsUi],
   );
 
   const unassigned = esc.filter((t) => !t.assignedTo).length;
-  const crit = esc.filter((t) => t.severity === "critical").length;
-  const avgH = avgResolutionHours(tickets);
+  const crit = esc.filter((t) => t.severity === "high" || t.severity === "critical").length;
+  const avgH = avgResolutionHours(ticketsUi);
 
   const [sortKey, setSortKey] = useState<"age" | "id">("age");
 
@@ -105,7 +110,7 @@ export default function EscalatedPage() {
             className="rounded bg-[var(--brand)] px-2 py-1 text-[10px] text-white"
             onClick={(e) => {
               e.stopPropagation();
-              if (user) claimTicket(r.ticketId, user.userId);
+              if (user) void claimTicket(Number.parseInt(r.ticketId, 10));
             }}
           >
             Claim

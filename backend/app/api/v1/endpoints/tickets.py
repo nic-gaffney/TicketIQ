@@ -235,6 +235,8 @@ async def update_ticket_tech(
         if body.status == TicketStatus.resolved:
             t.resolution_summary = (body.resolution_summary or t.resolution_summary or "").strip()
             t.resolved_at = datetime.now(UTC)
+        if body.status == TicketStatus.escalated and prev_status != TicketStatus.escalated:
+            t.escalated_at = datetime.now(UTC)
         if body.status == TicketStatus.in_progress and prev_status != TicketStatus.in_progress:
             session.add(
                 AuditLog(

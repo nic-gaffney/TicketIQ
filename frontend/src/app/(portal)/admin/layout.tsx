@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { isItSupport } from "@/lib/roles";
 
 export default function AdminSectionLayout({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -11,7 +12,7 @@ export default function AdminSectionLayout({ children }: { children: React.React
 
   useEffect(() => {
     if (user && user.role !== "admin") {
-      router.replace(user.role === "technician" ? "/technician/queue" : "/dashboard");
+      router.replace(isItSupport(user.role) ? "/technician/queue" : "/dashboard");
     }
   }, [user, router]);
 
