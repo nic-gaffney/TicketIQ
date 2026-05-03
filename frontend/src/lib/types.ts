@@ -3,6 +3,7 @@
 // Aliases preserve the old names so existing imports keep working.
 
 import type { components } from "@/lib/api.types";
+import { mapApiCategoryToIssueCategory } from "@/lib/category-mapping";
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
@@ -133,7 +134,7 @@ export function ticketFromApi(t: TicketOut): Ticket {
     submittedBy:    String(t.submitted_by_id),
     description:    t.description,
     affectedSystem: t.affected_system,
-    category:       t.category as IssueCategory,
+    category:       mapApiCategoryToIssueCategory(t.category) as IssueCategory,
     severity:       t.severity,
     urgency:        t.urgency,
     priorityScore:  t.priority_score,

@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.db.base import Base
 from app.db.session import AsyncSessionLocal, engine
 from app.services.escalation import run_escalation_check
-from app.services.seed import seed_if_empty
+from app.services.seed import seed_demo_tickets_if_needed, seed_if_empty
 
 scheduler = AsyncIOScheduler()
 
@@ -33,6 +33,7 @@ async def lifespan(app: FastAPI):
 
     async with AsyncSessionLocal() as session:
         await seed_if_empty(session)
+        await seed_demo_tickets_if_needed(session)
         await session.commit()
 
     scheduler.add_job(

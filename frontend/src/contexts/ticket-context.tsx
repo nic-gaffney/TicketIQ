@@ -25,8 +25,10 @@ export type TicketAssign       = components["schemas"]["TicketAssign"];
 // ── API client ───────────────────────────────────────────────────────────────
 import { getStoredToken } from "@/contexts/auth-context";
 
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001").replace(/\/$/, "");
+
 const apiClient = createClient<paths>({
-  baseUrl: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001",
+  baseUrl: API_BASE,
   headers: {
     get Authorization() {
       const token = getStoredToken();
@@ -34,6 +36,11 @@ const apiClient = createClient<paths>({
     },
   },
 });
+
+function authHeadersInit(): HeadersInit {
+  const token = getStoredToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 
 // ── Context type ─────────────────────────────────────────────────────────────
@@ -45,7 +52,13 @@ export type TicketContextValue = {
   refresh:    () => Promise<void>;
 
   getTicket:       (id: number) => Ticket | undefined;
-  createTicket:    (body: { description: string; affected_system: string; category: string; region?: string; attachment?: string }) => Promise<Ticket>;
+  createTicket:    (body: {
+    description: string;
+    affected_system: string;
+    category: string;
+    region?: string | null;
+    attachment?: File | null;
+  }) => Promise<Ticket>;
   updateTicketTech:(id: number, patch: TicketUpdateTech) => Promise<Ticket>;
   claimTicket:     (id: number) => Promise<Ticket>;
   assignTicket:    (id: number, assignee_id: number) => Promise<Ticket>;
@@ -94,14 +107,40 @@ const refresh = useCallback(async () => {
     [tickets],
   );
 
-  const createTicket = useCallback(async (
-    body: { description: string; affected_system: string; category: string; region?: string; attachment?: string }
-  ): Promise<Ticket> => {
-    const { data, error } = await apiClient.POST("/api/v1/tickets", {
-      // multipart/form-data — openapi-fetch sends FormData automatically
-      body: { ...body, attachment: body.attachment ?? null, region: body.region ?? null },
+  const createTicket = useCallback(async (body: {
+    description: string;
+    affected_system: string;
+    category: string;
+    region?: string | null;
+    attachment?: File | null;
+  }): Promise<Ticket> => {
+    // Use native fetch + FormData so multipart is always correct (FastAPI Form(...) fields).
+    const fd = new FormData();
+    fd.append("description", body.description);
+    fd.append("affected_system", body.affected_system);
+    fd.append("category", body.category);
+    if (body.region != null && body.region !== "") {
+      fd.append("region", body.region);
+    }
+    if (body.attachment) {
+      fd.append("attachment", body.attachment);
+    }
+    const res = await fetch(`${API_BASE}/api/v1/tickets`, {
+      method: "POST",
+      headers: authHeadersInit(),
+      body: fd,
     });
-    if (error) throw new Error(JSON.stringify(error));
+    const raw = await res.text();
+    if (!res.ok) {
+      let msg = raw || res.statusText;
+      try {
+        msg = JSON.stringify(JSON.parse(raw));
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new Error(msg);
+    }
+    const data = JSON.parse(raw) as Ticket;
     setTickets((prev) => [data, ...prev]);
     return data;
   }, []);

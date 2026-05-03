@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -14,39 +14,53 @@ import {
 } from "lucide-react";
 import { useTickets } from "@/contexts/ticket-context";
 import { useAuth } from "@/contexts/auth-context";
+import { useToast } from "@/contexts/toast-context";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import type { IssueCategory, Severity, Ticket, Urgency } from "@/lib/types";
+import type { IssueCategory, Severity, Urgency } from "@/lib/types";
+import { ISSUE_CATEGORY_OPTIONS, issueCategoryToApiCategory } from "@/lib/category-mapping";
 import { cn } from "@/lib/utils";
 
-const categoryMeta: {
-  value: IssueCategory;
-  label: string;
-  icon: React.ElementType;
-}[] = [
-  { value: "network", label: "Network", icon: Wifi },
-  { value: "software", label: "Software", icon: Monitor },
-  { value: "hardware", label: "Hardware", icon: Cpu },
-  { value: "account", label: "Account", icon: KeyRound },
-  { value: "security", label: "Security", icon: Shield },
-  { value: "other", label: "Other", icon: HelpCircle },
-];
+const CATEGORY_ICONS: Record<IssueCategory, React.ElementType> = {
+  network: Wifi,
+  software: Monitor,
+  hardware: Cpu,
+  account: KeyRound,
+  security: Shield,
+  other: HelpCircle,
+};
 
-function newId() {
-  return `TM-${Date.now().toString().slice(-6)}`;
+function formatCreateError(err: unknown): string {
+  if (!(err instanceof Error)) return "Could not create ticket. Try again.";
+  try {
+    const parsed = JSON.parse(err.message) as { detail?: unknown };
+    const d = parsed?.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d)) {
+      const msg = d.map((x) => (typeof x === "object" && x && "msg" in x ? String((x as { msg: string }).msg) : "")).filter(Boolean).join("; ");
+      if (msg) return msg;
+    }
+  } catch {
+    /* raw message */
+  }
+  if (err.message.length < 400) return err.message;
+  return "Could not create ticket. Check category and fields, then try again.";
 }
 
 export default function SubmitTicketPage() {
   const { user } = useAuth();
   const { createTicket } = useTickets();
+  const { toast } = useToast();
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<IssueCategory>("network");
   const [userPriority, setUserPriority] = useState<"" | "low" | "medium" | "high">("");
   const [description, setDescription] = useState("");
   const [affected, setAffected] = useState("");
   const [region, setRegion] = useState(user?.region ?? "");
-  const [files, setFiles] = useState<{ name: string; size: number }[]>([]);
+  const [files, setFiles] = useState<File[]>([]);
   const [phase, setPhase] = useState<"form" | "analyze" | "done">("form");
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [result, setResult] = useState<{
     ticketId: string;
     severity: Severity;
@@ -61,40 +75,60 @@ export default function SubmitTicketPage() {
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const list = Array.from(e.dataTransfer.files).slice(0, 6);
-    setFiles(list.map((f) => ({ name: f.name, size: f.size })));
+    setFiles((prev) => [...prev, ...list].slice(0, 6));
   };
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = e.target.files;
+    if (!picked?.length) return;
+    setFiles((prev) => [...prev, ...Array.from(picked)].slice(0, 6));
+    e.target.value = "";
+  };
+
+  const removeFile = (name: string) => {
+    setFiles((prev) => prev.filter((f) => f.name !== name));
+  };
+
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !descOk) return;
+    setSubmitError(null);
     setPhase("analyze");
-    setTimeout(() => {
-      const id = newId();
-      const severity: Severity = userPriority === "high" ? "high" : "medium";
-      const urgency: Urgency = userPriority === "low" ? "low" : "medium";
-      const score = userPriority === "high" ? 78 : userPriority === "low" ? 34 : 56;
-      const t: Ticket = {
-        ticketId: id,
-        title: title || "General IT request",
-        submittedBy: user.userId,
-        description: description.trim(),
-        affectedSystem: affected || "Unspecified",
-        category,
-        severity,
-        urgency,
-        priorityScore: score,
-        status: "open",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        aiConfidence: 0.86,
-        slaDeadline: new Date(Date.now() + 1000 * 60 * 240).toISOString(),
-        region: region || user.region || "Unknown",
-        attachments: files.map((f) => f.name),
-      };
-      createTicket(t);
-      setResult({ ticketId: id, severity, urgency, score });
+    const affRaw = affected.trim();
+    const affected_system =
+      affRaw.length >= 2 ? affRaw.slice(0, 255) : "General IT systems";
+    const descBody = description.trim();
+    let fullDescription = title.trim() ? `${title.trim()}\n\n${descBody}` : descBody;
+    if (userPriority) {
+      fullDescription += `\n\n[Reporter priority note: ${userPriority}]`;
+    }
+    const apiCategory = issueCategoryToApiCategory(category);
+    const regionVal = (region.trim() || user.region || "").trim() || null;
+    const attachment = files[0] ?? null;
+
+    try {
+      const created = await createTicket({
+        description: fullDescription,
+        affected_system,
+        category: apiCategory,
+        region: regionVal,
+        attachment,
+      });
+      setResult({
+        ticketId: String(created.id),
+        severity: created.severity,
+        urgency: created.urgency,
+        score: created.priority_score,
+      });
       setPhase("done");
-    }, 2000);
+      setFiles([]);
+      toast({ title: "Ticket created", description: `Ticket #${created.id}`, kind: "success" });
+    } catch (err) {
+      setPhase("form");
+      const msg = formatCreateError(err);
+      setSubmitError(msg);
+      toast({ title: "Submit failed", description: msg, kind: "error" });
+    }
   };
 
   if (!user) {
@@ -112,7 +146,7 @@ export default function SubmitTicketPage() {
           Submit a ticket
         </h1>
         <p className="text-[var(--text-secondary)]">
-          Route through AI classification and NOC triage in minutes.
+          Creates a real ticket in TicketIQ (AI classification runs on the server).
         </p>
       </div>
 
@@ -124,7 +158,7 @@ export default function SubmitTicketPage() {
           {phase === "analyze" ? (
             <div className="flex flex-col items-center justify-center gap-4 py-16">
               <LoadingSpinner className="h-12 w-12" />
-              <p className="text-[var(--text-secondary)]">AI is analyzing your ticket…</p>
+              <p className="text-[var(--text-secondary)]">Submitting ticket…</p>
             </div>
           ) : phase === "done" && result ? (
             <div className="space-y-6 py-6 text-center">
@@ -157,15 +191,34 @@ export default function SubmitTicketPage() {
                   </span>
                 </motion.div>
               </AnimatePresence>
-              <Link
-                href={`/tickets/${result.ticketId}`}
-                className="inline-flex rounded-lg bg-[var(--brand)] px-6 py-2 text-sm font-semibold text-white hover:bg-[var(--brand-light)]"
-              >
-                Track your ticket
-              </Link>
+              <div className="flex flex-wrap justify-center gap-3">
+                <Link
+                  href={`/tickets/${result.ticketId}`}
+                  className="inline-flex rounded-lg bg-[var(--brand)] px-6 py-2 text-sm font-semibold text-white hover:bg-[var(--brand-light)]"
+                >
+                  Track your ticket
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhase("form");
+                    setResult(null);
+                    setSubmitError(null);
+                  }}
+                  className="rounded-lg border border-[var(--border)] px-6 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--surface)]"
+                >
+                  Submit another
+                </button>
+              </div>
             </div>
           ) : (
             <>
+              {submitError ? (
+                <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                  {submitError}
+                </p>
+              ) : null}
+
               <div>
                 <label className="text-xs uppercase text-[var(--text-secondary)]">
                   Ticket title
@@ -174,7 +227,7 @@ export default function SubmitTicketPage() {
                   className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[var(--text-primary)] outline-none focus:outline focus:outline-2 focus:outline-[var(--brand)]"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Short summary (optional — defaults if empty)"
+                  placeholder="Short summary (optional — prepended to description)"
                 />
               </div>
 
@@ -183,8 +236,8 @@ export default function SubmitTicketPage() {
                   Issue category
                 </label>
                 <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {categoryMeta.map((c) => {
-                    const Icon = c.icon;
+                  {ISSUE_CATEGORY_OPTIONS.map((c) => {
+                    const Icon = CATEGORY_ICONS[c.value];
                     const active = category === c.value;
                     return (
                       <button
@@ -208,18 +261,21 @@ export default function SubmitTicketPage() {
 
               <div>
                 <label className="text-xs uppercase text-[var(--text-secondary)]">
-                  Priority level (optional)
+                  Priority hint (optional)
                 </label>
                 <select
                   className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[var(--text-primary)]"
                   value={userPriority}
                   onChange={(e) => setUserPriority(e.target.value as typeof userPriority)}
                 >
-                  <option value="">Let AI decide</option>
+                  <option value="">None — let server classify from description</option>
                   <option value="low">Low — non-blocking</option>
                   <option value="medium">Medium — standard</option>
                   <option value="high">High — revenue / security risk</option>
                 </select>
+                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                  Appended to the description text so the server classifier can weigh it.
+                </p>
               </div>
 
               <div>
@@ -255,7 +311,12 @@ export default function SubmitTicketPage() {
                     className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[var(--text-primary)]"
                     value={affected}
                     onChange={(e) => setAffected(e.target.value)}
+                    placeholder="e.g. POS / WLAN, laptop hostname…"
                   />
+                  <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                    If left blank or too short, &quot;General IT systems&quot; is sent (server requires at least 2
+                    characters).
+                  </p>
                 </div>
                 <div>
                   <label className="text-xs uppercase text-[var(--text-secondary)]">
@@ -275,13 +336,36 @@ export default function SubmitTicketPage() {
                 className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface)]/40 p-6 text-center"
               >
                 <p className="text-sm text-[var(--text-secondary)]">
-                  Drag files here or paste paths for attachments (demo)
+                  Drag files here or add one attachment (first file is uploaded)
                 </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  multiple
+                  onChange={onFilePick}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-3 rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--surface)]"
+                >
+                  Choose files
+                </button>
                 {files.length ? (
                   <ul className="mt-3 space-y-1 text-left font-mono text-xs text-[var(--text-primary)]">
                     {files.map((f) => (
-                      <li key={f.name}>
-                        {f.name} — {(f.size / 1024).toFixed(1)} KB
+                      <li key={`${f.name}-${f.size}`} className="flex items-center justify-between gap-2">
+                        <span>
+                          {f.name} — {(f.size / 1024).toFixed(1)} KB
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeFile(f.name)}
+                          className="text-[var(--brand-light)] hover:underline"
+                        >
+                          Remove
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -322,12 +406,12 @@ export default function SubmitTicketPage() {
                 for faster routing.
               </li>
               <li>
-                <span className="font-mono text-[var(--brand)]">2.</span> NLP models infer
-                severity, urgency, and queue placement.
+                <span className="font-mono text-[var(--brand)]">2.</span> The server classifies severity,
+                urgency, and priority score.
               </li>
               <li>
-                <span className="font-mono text-[var(--brand)]">3.</span> Best-fit technician
-                receives the ticket with SLA clock running.
+                <span className="font-mono text-[var(--brand)]">3.</span> Your ticket appears in the IT queue
+                and on your dashboard.
               </li>
             </ol>
           </div>
@@ -345,7 +429,7 @@ export default function SubmitTicketPage() {
             <p className="text-xs uppercase tracking-wider text-[var(--text-secondary)]">
               Live status
             </p>
-            <p className="mt-2 font-mono text-lg text-emerald-300">AI classification: Ready</p>
+            <p className="mt-2 font-mono text-lg text-emerald-300">API submit: Ready</p>
           </div>
         </aside>
       </div>

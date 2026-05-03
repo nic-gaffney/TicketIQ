@@ -6,12 +6,10 @@ import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import {
-  applySeverityOverride,
-  useTickets,
-} from "@/contexts/ticket-context";
+import { useTickets } from "@/contexts/ticket-context";
 import { useToast } from "@/contexts/toast-context";
-import { MOCK_USERS, userById } from "@/lib/mock-data";
+import { userById } from "@/lib/mock-data";
+import { isAdmin, isItSupport } from "@/lib/roles";
 import { AIClassificationBlock } from "@/components/tickets/ai-classification-block";
 import { AttachmentPreview } from "@/components/tickets/attachment-preview";
 import { InternalNoteThread } from "@/components/tickets/internal-note-thread";
@@ -22,40 +20,63 @@ import { Modal } from "@/components/ui/modal";
 import { SLATimer } from "@/components/ui/sla-timer";
 import { StatusPill } from "@/components/ui/status-pill";
 import { assigneeName } from "@/lib/ticket-helpers";
-import type { Note, Severity } from "@/lib/types";
+import { ticketFromApi, type Severity } from "@/lib/types";
 
 export default function TicketDetailPage() {
   const params = useParams<{ id: string }>();
   const rawId = params?.id;
   const id = typeof rawId === "string" ? decodeURIComponent(rawId) : "";
+  const ticketNumericId = id !== "" ? Number.parseInt(id, 10) : NaN;
   const router = useRouter();
   const { user } = useAuth();
   const { toast } = useToast();
   const ticketCtx = useTickets();
-  const { tickets, getTicket, updateTicket, claimTicket, addNote, addAudit } = ticketCtx;
+  const {
+    tickets,
+    getTicket,
+    updateTicketTech,
+    claimTicket,
+    assignTicket,
+    adminOverride,
+  } = ticketCtx;
 
-  const ticket = getTicket(id);
+  const apiTicket =
+    Number.isFinite(ticketNumericId) ? getTicket(ticketNumericId) : undefined;
+  const ticket = apiTicket ? ticketFromApi(apiTicket) : undefined;
   const [noteBody, setNoteBody] = useState("");
   const [severityDraft, setSeverityDraft] = useState<Severity | "">("");
   const [overrideModal, setOverrideModal] = useState(false);
   const [confirmEscalate, setConfirmEscalate] = useState(false);
   const [assigneeDraft, setAssigneeDraft] = useState("");
+  const [resolveModal, setResolveModal] = useState(false);
+  const [resolutionSummary, setResolutionSummary] = useState("");
 
   const submitter = ticket ? userById(ticket.submittedBy) : undefined;
 
   const queueRank = useMemo(() => {
     if (!ticket) return null;
-    const sorted = [...tickets].sort((a, b) => b.priorityScore - a.priorityScore);
+    const sorted = [...tickets]
+      .map(ticketFromApi)
+      .sort((a, b) => b.priorityScore - a.priorityScore);
     const idx = sorted.findIndex((t) => t.ticketId === ticket.ticketId);
     return idx >= 0 ? idx + 1 : null;
   }, [tickets, ticket]);
 
-  const techs = useMemo(
-    () => MOCK_USERS.filter((u) => u.role === "technician"),
-    [],
-  );
+  const assigneeOptions = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const t of tickets) {
+      const a = t.assignee;
+      if (a && (a.role === "it_support" || a.role === "admin")) {
+        m.set(a.id, a.full_name);
+      }
+    }
+    if (user && (isItSupport(user.role) || isAdmin(user.role))) {
+      m.set(user.id, `${user.full_name} (you)`);
+    }
+    return [...m.entries()].map(([assigneeId, name]) => ({ id: assigneeId, name }));
+  }, [tickets, user]);
 
-  if (!id || !user || !ticket) {
+  if (!id || !user || !ticket || !apiTicket) {
     return (
       <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-10 text-center">
         <p className="text-[var(--text-secondary)]">
@@ -68,96 +89,130 @@ export default function TicketDetailPage() {
     );
   }
 
-  const canTechNotes = user.role === "technician" || user.role === "admin";
-  const canAssign = user.role === "technician" || user.role === "admin";
-  const adminOnly = user.role === "admin";
+  const canTechNotes = isItSupport(user.role) || isAdmin(user.role);
+  const canAssign = isItSupport(user.role) || isAdmin(user.role);
+  const adminOnly = isAdmin(user.role);
   /** Resolve / escalate / claim — IT staff only; end users are read-only for workflow actions */
-  const canManageTicket = user.role === "technician" || user.role === "admin";
+  const canManageTicket = isItSupport(user.role) || isAdmin(user.role);
 
-  const postNote = () => {
+  const postNote = async () => {
     if (!noteBody.trim()) return;
-    const note: Note = {
-      noteId:
-        typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `n-${Date.now()}`,
-      authorId: user.userId,
-      content: noteBody.trim(),
-      createdAt: new Date().toISOString(),
-      visibleToUser: false,
-    };
-    addNote(ticket.ticketId, note);
-    setNoteBody("");
-    toast({ title: "Note posted", kind: "success" });
+    const stamp = new Date().toISOString();
+    const line = `[${stamp}] ${user.full_name}: ${noteBody.trim()}`;
+    const existing = (apiTicket.internal_notes ?? "").trim();
+    const next = existing ? `${existing}\n\n${line}` : line;
+    try {
+      await updateTicketTech(ticketNumericId, { internal_notes: next });
+      setNoteBody("");
+      toast({ title: "Note posted", kind: "success" });
+    } catch (e: unknown) {
+      toast({
+        title: "Failed to post note",
+        description: e instanceof Error ? e.message : String(e),
+        kind: "error",
+      });
+    }
   };
 
-  const onClaim = () => {
-    claimTicket(ticket.ticketId, user.userId);
-    toast({ title: "Ticket claimed", description: ticket.ticketId, kind: "success" });
+  const onClaim = async () => {
+    try {
+      await claimTicket(ticketNumericId);
+      toast({ title: "Ticket claimed", description: ticket.ticketId, kind: "success" });
+    } catch (e: unknown) {
+      toast({
+        title: "Claim failed",
+        description: e instanceof Error ? e.message : String(e),
+        kind: "error",
+      });
+    }
   };
 
-  const onResolve = () => {
-    updateTicket(ticket.ticketId, {
-      status: "resolved",
-      resolvedAt: new Date().toISOString(),
-    });
-    addAudit({
-      actorId: user.userId,
-      actorType: user.role === "admin" ? "admin" : "technician",
-      actionType: "closure",
-      ticketId: ticket.ticketId,
-      oldValue: ticket.status,
-      newValue: "resolved",
-    });
-    toast({ title: "Ticket resolved", kind: "success" });
+  const confirmResolve = async () => {
+    const summary = resolutionSummary.trim();
+    if (!summary) {
+      toast({ title: "Resolution summary required", kind: "warning" });
+      return;
+    }
+    try {
+      await updateTicketTech(ticketNumericId, {
+        status: "resolved",
+        resolution_summary: summary,
+      });
+      setResolveModal(false);
+      setResolutionSummary("");
+      toast({ title: "Ticket resolved", kind: "success" });
+    } catch (e: unknown) {
+      toast({
+        title: "Resolve failed",
+        description: e instanceof Error ? e.message : String(e),
+        kind: "error",
+      });
+    }
   };
 
-  const onEscalate = () => {
-    updateTicket(ticket.ticketId, {
-      status: "escalated",
-      escalatedAt: new Date().toISOString(),
-    });
-    addAudit({
-      actorId: user.userId,
-      actorType: user.role === "admin" ? "admin" : "technician",
-      actionType: "escalation",
-      ticketId: ticket.ticketId,
-      oldValue: ticket.status,
-      newValue: "escalated",
-    });
-    toast({ title: "Escalated", kind: "warning" });
-    setConfirmEscalate(false);
+  const onEscalate = async () => {
+    try {
+      await updateTicketTech(ticketNumericId, { status: "escalated" });
+      setConfirmEscalate(false);
+      toast({ title: "Escalated", kind: "warning" });
+    } catch (e: unknown) {
+      toast({
+        title: "Escalation failed",
+        description: e instanceof Error ? e.message : String(e),
+        kind: "error",
+      });
+    }
   };
 
-  const onReassign = () => {
+  const onMarkInProgress = async () => {
+    try {
+      await updateTicketTech(ticketNumericId, { status: "in_progress" });
+      toast({ title: "Marked in progress", kind: "success" });
+    } catch (e: unknown) {
+      toast({
+        title: "Update failed",
+        description: e instanceof Error ? e.message : String(e),
+        kind: "error",
+      });
+    }
+  };
+
+  const onReassign = async () => {
     if (!assigneeDraft) return;
-    updateTicket(ticket.ticketId, {
-      assignedTo: assigneeDraft,
-      status: ticket.status === "open" ? "assigned" : ticket.status,
-    });
-    addAudit({
-      actorId: user.userId,
-      actorType: user.role === "admin" ? "admin" : "technician",
-      actionType: "reassignment",
-      ticketId: ticket.ticketId,
-      oldValue: ticket.assignedTo,
-      newValue: assigneeDraft,
-    });
-    toast({ title: "Assignment updated", kind: "success" });
+    const aid = Number.parseInt(assigneeDraft, 10);
+    if (!Number.isFinite(aid)) return;
+    try {
+      await assignTicket(ticketNumericId, aid);
+      setAssigneeDraft("");
+      toast({ title: "Assignment updated", kind: "success" });
+    } catch (e: unknown) {
+      toast({
+        title: "Reassign failed",
+        description: e instanceof Error ? e.message : String(e),
+        kind: "error",
+      });
+    }
   };
 
-  const applyOverride = () => {
-    if (!severityDraft) return;
-    applySeverityOverride(
-      ticketCtx,
-      ticket.ticketId,
-      user.userId,
-      severityDraft,
-      "Admin UI override",
-    );
-    toast({ title: "Severity updated", kind: "success" });
-    setOverrideModal(false);
-    setSeverityDraft("");
+  const applyOverride = async () => {
+    if (!severityDraft || severityDraft === "critical") {
+      toast({ title: "Pick low, medium, or high", kind: "warning" });
+      return;
+    }
+    try {
+      await adminOverride(ticketNumericId, {
+        severity: severityDraft as "low" | "medium" | "high",
+      });
+      toast({ title: "Severity updated", kind: "success" });
+      setOverrideModal(false);
+      setSeverityDraft("");
+    } catch (e: unknown) {
+      toast({
+        title: "Override failed",
+        description: e instanceof Error ? e.message : String(e),
+        kind: "error",
+      });
+    }
   };
 
   return (
@@ -228,12 +283,14 @@ export default function TicketDetailPage() {
               <div>
                 <dt className="text-[var(--text-secondary)]">Submitted by</dt>
                 <dd className="font-medium text-[var(--text-primary)]">
-                  {submitter?.name ?? ticket.submittedBy}
+                  {apiTicket.submitter?.full_name ?? submitter?.name ?? ticket.submittedBy}
                 </dd>
               </div>
               <div>
                 <dt className="text-[var(--text-secondary)]">Assigned to</dt>
-                <dd className="text-[var(--text-primary)]">{assigneeName(ticket)}</dd>
+                <dd className="text-[var(--text-primary)]">
+                  {apiTicket.assignee?.full_name ?? assigneeName(ticket)}
+                </dd>
               </div>
               <div>
                 <dt className="text-[var(--text-secondary)]">Category</dt>
@@ -312,7 +369,7 @@ export default function TicketDetailPage() {
                 onChange={(e) => setSeverityDraft(e.target.value as Severity)}
               >
                 <option value="">Select…</option>
-                {(["low", "medium", "high", "critical"] as const).map((s) => (
+                {(["low", "medium", "high"] as const).map((s) => (
                   <option key={s} value={s}>
                     {s}
                   </option>
@@ -336,10 +393,9 @@ export default function TicketDetailPage() {
                 value={assigneeDraft || ticket.assignedTo || ""}
                 onChange={(e) => setAssigneeDraft(e.target.value)}
               >
-                <option value="">Unassigned</option>
-                {techs.map((t) => (
-                  <option key={t.userId} value={t.userId}>
-                    {t.name}
+                {assigneeOptions.map((o) => (
+                  <option key={o.id} value={String(o.id)}>
+                    {o.name}
                   </option>
                 ))}
               </select>
@@ -358,14 +414,35 @@ export default function TicketDetailPage() {
               <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                 IT actions
               </p>
-              <button
-                type="button"
-                onClick={onResolve}
-                className="w-full rounded-lg bg-emerald-700 py-2 text-sm font-medium text-white hover:bg-emerald-600"
-              >
-                ✓ Resolve ticket
-              </button>
-              {ticket.status !== "escalated" ? (
+              {(isItSupport(user.role) || isAdmin(user.role)) &&
+              ticket.assignedTo !== String(user.id) ? (
+                <button
+                  type="button"
+                  onClick={() => void onClaim()}
+                  className="w-full rounded-lg bg-[var(--brand)] py-2 text-sm font-semibold text-white"
+                >
+                  Claim ticket
+                </button>
+              ) : null}
+              {ticket.status !== "in_progress" && ticket.status !== "resolved" ? (
+                <button
+                  type="button"
+                  onClick={() => void onMarkInProgress()}
+                  className="w-full rounded-lg border border-[var(--border)] py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--surface)]"
+                >
+                  Mark in progress
+                </button>
+              ) : null}
+              {ticket.status !== "resolved" ? (
+                <button
+                  type="button"
+                  onClick={() => setResolveModal(true)}
+                  className="w-full rounded-lg bg-emerald-700 py-2 text-sm font-medium text-white hover:bg-emerald-600"
+                >
+                  ✓ Resolve ticket…
+                </button>
+              ) : null}
+              {ticket.status !== "escalated" && ticket.status !== "resolved" ? (
                 <button
                   type="button"
                   onClick={() => setConfirmEscalate(true)}
@@ -384,15 +461,6 @@ export default function TicketDetailPage() {
                   Add internal note
                 </button>
               ) : null}
-              {user.role === "technician" && ticket.assignedTo !== user.userId ? (
-                <button
-                  type="button"
-                  onClick={onClaim}
-                  className="w-full rounded-lg bg-[var(--brand)] py-2 text-sm font-semibold text-white"
-                >
-                  Claim ticket
-                </button>
-              ) : null}
             </div>
           ) : (
             <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-5 text-sm text-[var(--text-secondary)]">
@@ -406,12 +474,43 @@ export default function TicketDetailPage() {
       <ConfirmDialog
         open={confirmEscalate}
         onClose={() => setConfirmEscalate(false)}
-        onConfirm={onEscalate}
+        onConfirm={() => void onEscalate()}
         title="Escalate this ticket?"
         description="Escalation notifies duty managers and adjusts SLA handling."
         confirmLabel="Escalate"
         danger
       />
+
+      <Modal open={resolveModal} onClose={() => setResolveModal(false)} title="Resolve ticket">
+        <p className="mb-2 text-sm text-[var(--text-secondary)]">
+          The API requires a short resolution summary before closing the ticket.
+        </p>
+        <textarea
+          className="mb-4 min-h-[100px] w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-primary)]"
+          placeholder="What was done / outcome…"
+          value={resolutionSummary}
+          onChange={(e) => setResolutionSummary(e.target.value)}
+        />
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm"
+            onClick={() => {
+              setResolveModal(false);
+              setResolutionSummary("");
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600"
+            onClick={() => void confirmResolve()}
+          >
+            Resolve
+          </button>
+        </div>
+      </Modal>
 
       <Modal open={overrideModal} onClose={() => setOverrideModal(false)} title="Confirm override">
         <p className="mb-4 text-sm text-[var(--text-secondary)]">
@@ -428,7 +527,7 @@ export default function TicketDetailPage() {
           <button
             type="button"
             className="rounded-lg bg-[var(--brand)] px-4 py-2 text-sm text-white"
-            onClick={applyOverride}
+            onClick={() => void applyOverride()}
           >
             Confirm
           </button>

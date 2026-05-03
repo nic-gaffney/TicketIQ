@@ -3,6 +3,7 @@
 import { MOCK_USERS } from "@/lib/mock-data";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { isAdmin, isItSupport } from "@/lib/roles";
 
 export default function UserManagementPage() {
   return (
@@ -35,9 +36,9 @@ export default function UserManagementPage() {
                 <td className="px-4 py-3">
                   <Badge
                     variant={
-                      u.role === "admin"
+                      isAdmin(u.role)
                         ? "role-admin"
-                        : u.role === "technician"
+                        : isItSupport(u.role)
                           ? "role-tech"
                           : "role-user"
                     }

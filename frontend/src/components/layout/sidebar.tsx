@@ -17,6 +17,7 @@ import {
   LogOut,
   PlusCircle,
   Shield,
+  UserRoundCog,
   Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -24,10 +25,17 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { isAdmin, isEndUser, isItSupport } from "@/lib/roles";
 
 const STORAGE_COLLAPSED = "ticketiq_sidebar_collapsed";
 
-type NavItem = { href: string; label: string; icon: React.ElementType };
+type NavItem = {
+  href: string;
+  label: string;
+  icon: React.ElementType;
+  /** Override default active detection (needed when two items share the same href). */
+  isActive?: (pathname: string) => boolean;
+};
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -61,16 +69,27 @@ export function Sidebar() {
 
   const items = useMemo<NavItem[]>(() => {
     if (!user) return [];
-    if (user.role === "end_user") {
+    if (isEndUser(user.role)) {
       return [
-        { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-        { href: "/dashboard", label: "My Tickets", icon: ClipboardList },
+        {
+          href: "/dashboard",
+          label: "Dashboard",
+          icon: LayoutDashboard,
+          isActive: (p) => p === "/dashboard",
+        },
+        {
+          href: "/dashboard",
+          label: "My Tickets",
+          icon: ClipboardList,
+          isActive: (p) => p.startsWith("/tickets/") && !p.startsWith("/tickets/submit"),
+        },
         { href: "/tickets/submit", label: "Submit Ticket", icon: PlusCircle },
       ];
     }
-    if (user.role === "technician") {
+    if (isItSupport(user.role)) {
       return [
         { href: "/technician/queue", label: "Queue", icon: Activity },
+        { href: "/technician/profile", label: "My specializations", icon: UserRoundCog },
         { href: "/technician/escalated", label: "Escalated", icon: AlertTriangle },
         { href: "/technician/resolved", label: "Resolved History", icon: History },
         { href: "/technician/knowledge", label: "Knowledge Base", icon: BookOpen },
@@ -88,12 +107,11 @@ export function Sidebar() {
 
   if (!user) return null;
 
-  const roleVariant =
-    user.role === "admin"
-      ? ("role-admin" as const)
-      : user.role === "technician"
-        ? ("role-tech" as const)
-        : ("role-user" as const);
+  const roleVariant = isAdmin(user.role)
+    ? ("role-admin" as const)
+    : isItSupport(user.role)
+      ? ("role-tech" as const)
+      : ("role-user" as const);
 
   return (
     <aside
@@ -128,11 +146,12 @@ export function Sidebar() {
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
         {items.map((item) => {
-          const active =
-            pathname === item.href ||
-            (item.href !== "/dashboard" &&
-              !!pathname &&
-              pathname.startsWith(item.href));
+          const active = item.isActive
+            ? item.isActive(pathname)
+            : pathname === item.href ||
+              (item.href !== "/dashboard" &&
+                !!pathname &&
+                pathname.startsWith(item.href));
           const Icon = item.icon;
           return (
             <Link

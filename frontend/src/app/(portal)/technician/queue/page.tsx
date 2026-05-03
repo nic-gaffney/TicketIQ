@@ -1,19 +1,28 @@
 "use client";
 
 import { format } from "date-fns";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Star, Timer } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useTickets } from "@/contexts/ticket-context";
 import { useToast } from "@/contexts/toast-context";
+import { useTechnicianSpecializations } from "@/hooks/use-technician-specializations";
 import { userById } from "@/lib/mock-data";
+import { issueCategoryLabel } from "@/lib/category-mapping";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { StatCard } from "@/components/ui/stat-card";
 import { TicketCard } from "@/components/tickets/ticket-card";
 import { avgResolutionHours } from "@/lib/ticket-helpers";
-import type { IssueCategory, Severity, Ticket, TicketStatus } from "@/lib/types";
+import {
+  ticketFromApi,
+  type IssueCategory,
+  type Severity,
+  type Ticket,
+  type TicketStatus,
+} from "@/lib/types";
 import { Activity, AlertOctagon, Flame, Timer as TimerIcon } from "lucide-react";
 
 const REFRESH_SEC = 30;
@@ -24,6 +33,7 @@ export default function TechnicianQueuePage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const { tickets, claimTicket, runAutoEscalation } = useTickets();
+  const { specializations } = useTechnicianSpecializations(user?.id);
   const router = useRouter();
   const [left, setLeft] = useState(REFRESH_SEC);
   const [cat, setCat] = useState<IssueCategory | "all">("all");
@@ -40,21 +50,18 @@ export default function TechnicianQueuePage() {
 
   useEffect(() => {
     const id = setInterval(() => {
-      const n = runAutoEscalation();
-      if (n > 0) {
-        toast({
-          title: "Auto-escalation",
-          description: `${n} ticket(s) escalated by policy`,
-          kind: "warning",
-        });
-      }
+      void runAutoEscalation().catch(() => {
+        /* admin-only endpoint for some roles — ignore */
+      });
     }, REFRESH_SEC * 1000);
     return () => clearInterval(id);
-  }, [runAutoEscalation, toast]);
+  }, [runAutoEscalation]);
+
+  const ticketsUi = useMemo(() => tickets.map(ticketFromApi), [tickets]);
 
   const openPipeline = useMemo(
     () =>
-      tickets
+      ticketsUi
         .filter(
           (t) =>
             t.status === "open" ||
@@ -63,7 +70,7 @@ export default function TechnicianQueuePage() {
             t.status === "escalated",
         )
         .sort((a, b) => b.priorityScore - a.priorityScore),
-    [tickets],
+    [ticketsUi],
   );
 
   const filtered = useMemo(() => {
@@ -77,24 +84,24 @@ export default function TechnicianQueuePage() {
   }, [openPipeline, cat, sev, reg, st]);
 
   const regions = useMemo(
-    () => Array.from(new Set(tickets.map((t) => t.region))).sort(),
-    [tickets],
+    () => Array.from(new Set(ticketsUi.map((t) => t.region).filter(Boolean))).sort(),
+    [ticketsUi],
   );
 
   const best = useMemo(() => {
-    if (!user?.specializations?.length) return openPipeline.slice(0, 3);
-    return openPipeline
-      .filter((t) => user.specializations!.includes(t.category))
-      .slice(0, 3);
-  }, [openPipeline, user]);
+    if (!specializations.length) return openPipeline.slice(0, 3);
+    const matched = openPipeline.filter((t) => specializations.includes(t.category));
+    if (!matched.length) return [];
+    return matched.slice(0, 3);
+  }, [openPipeline, specializations]);
 
   const isBestFor = (t: Ticket) =>
-    user?.specializations?.includes(t.category) ?? false;
+    specializations.length > 0 && specializations.includes(t.category);
 
   const active = openPipeline.length;
   const highP = openPipeline.filter((t) => t.priorityScore >= 75).length;
   const esc = openPipeline.filter((t) => t.status === "escalated").length;
-  const avgR = avgResolutionHours(tickets);
+  const avgR = avgResolutionHours(ticketsUi);
 
   const rows: Row[] = filtered.map((t) => ({ ...t, id: t.ticketId }));
 
@@ -143,7 +150,9 @@ export default function TechnicianQueuePage() {
       header: "Category",
       sortable: true,
       accessor: (r) => r.category,
-      cell: (r) => <span className="capitalize">{r.category}</span>,
+      cell: (r) => (
+        <span className="text-[var(--text-secondary)]">{issueCategoryLabel(r.category)}</span>
+      ),
     },
     {
       id: "score",
@@ -181,8 +190,9 @@ export default function TechnicianQueuePage() {
           onClick={(e) => {
             e.stopPropagation();
             if (!user) return;
-            claimTicket(r.ticketId, user.userId);
-            toast({ title: "Claimed", description: r.ticketId, kind: "success" });
+            void claimTicket(Number.parseInt(r.ticketId, 10)).then(() => {
+              toast({ title: "Claimed", description: r.ticketId, kind: "success" });
+            });
           }}
         >
           Claim
@@ -203,6 +213,12 @@ export default function TechnicianQueuePage() {
           <p className="text-[var(--text-secondary)]">
             Sorted by AI-generated priority score · Auto-refresh policy checks every {REFRESH_SEC}s
           </p>
+          <Link
+            href="/technician/profile"
+            className="mt-2 inline-block text-sm font-medium text-[var(--brand-light)] hover:underline"
+          >
+            Edit issue-type specializations
+          </Link>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative h-14 w-14">
@@ -318,7 +334,11 @@ export default function TechnicianQueuePage() {
             Recommended for you
           </h2>
           {best.length === 0 ? (
-            <p className="text-sm text-[var(--text-secondary)]">No specialization matches.</p>
+            <p className="text-sm text-[var(--text-secondary)]">
+              {specializations.length === 0
+                ? "Optional: set specializations on your profile to prioritize tickets that match the same issue types users pick when submitting."
+                : "No tickets in the queue currently match your selected specializations."}
+            </p>
           ) : (
             best.map((t) => (
               <TicketCard key={t.ticketId} ticket={t} />
