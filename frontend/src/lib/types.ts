@@ -59,6 +59,7 @@ export type Ticket = {
   aiConfidence:   number;                           // frontend-only, not in API
   slaDeadline:    string;                           // frontend-only, not in API
   region:         string;
+  assignee?:       string;
 };
 
 // Note — no direct API equivalent, internal_notes is a plain string on TicketOut
@@ -150,6 +151,7 @@ export function ticketFromApi(t: TicketOut): Ticket {
       : undefined,
     aiConfidence:   0,       // not in API, default until you add it
     slaDeadline:    t.created_at, // not in API, default until you add it
+    assignee:       t.assignee?.full_name ?? (t.assigned_to_id ? String(t.assigned_to_id) : undefined),
     region:         t.region ?? "",
   };
 }

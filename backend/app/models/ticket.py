@@ -17,6 +17,7 @@ class TicketStatus(enum.StrEnum):
     in_progress = "in_progress"
     resolved = "resolved"
     escalated = "escalated"
+    archived = "archived"
 
 
 class Severity(enum.StrEnum):

@@ -1,0 +1,6 @@
+# docker-compose.dev.yml
+services:
+  frontend:
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules

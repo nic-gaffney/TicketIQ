@@ -28,20 +28,15 @@ RUN npm run build
 
 # ─── Production (standalone) ────────────────────────────────────────────────
 FROM node:22-alpine AS production
-
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx/spa.conf /etc/nginx/conf.d/default.conf
-
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
 
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
 EXPOSE 3000
-ENV HOSTNAME=0.0.0.0
-ENV PORT=3000
-
 CMD ["node", "server.js"]

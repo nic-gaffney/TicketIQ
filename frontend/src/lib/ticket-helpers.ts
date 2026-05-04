@@ -1,10 +1,10 @@
 import { differenceInHours } from "date-fns";
 import type { Ticket } from "./types";
-import { userById } from "./mock-data";
+// import { userById } from "./mock-data";
 
 export function assigneeName(t: Ticket): string {
   if (!t.assignedTo) return "—";
-  return userById(t.assignedTo)?.name ?? t.assignedTo;
+  return t.assignee ?? t.assignedTo;
 }
 
 export function avgResolutionHours(tickets: Ticket[]): number {

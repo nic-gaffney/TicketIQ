@@ -7,7 +7,7 @@ import { useState } from "react";
 import { useAuth, type UserPublic } from "@/contexts/auth-context";
 
 function homePathForRole(role: UserPublic["role"]): string {
-  if (role === "end_user") return "/dashboard";
+  if (role === "user") return "/dashboard";
   if (role === "it_support") return "/technician/queue";
   return "/admin/overview";
 }

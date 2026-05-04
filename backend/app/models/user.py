@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 class UserRole(enum.StrEnum):
-    end_user = "end_user"
+    end_user = "user"
     it_support = "it_support"
     admin = "admin"
 

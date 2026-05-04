@@ -9,7 +9,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { useTickets } from "@/contexts/ticket-context";
 import { useToast } from "@/contexts/toast-context";
 import { useTechnicianSpecializations } from "@/hooks/use-technician-specializations";
-import { userById } from "@/lib/mock-data";
+// import { userById } from "@/lib/mock-data";
 import { issueCategoryLabel } from "@/lib/category-mapping";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { FilterBar } from "@/components/ui/filter-bar";
@@ -140,9 +140,9 @@ export default function TechnicianQueuePage() {
       id: "user",
       header: "User",
       sortable: true,
-      accessor: (r) => userById(r.submittedBy)?.name ?? "",
+      accessor: (r) => r.submittedBy,
       cell: (r) => (
-        <span>{userById(r.submittedBy)?.name ?? r.submittedBy}</span>
+        <span>{r.submittedBy ?? r.submittedBy}</span>
       ),
     },
     {

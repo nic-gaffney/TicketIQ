@@ -229,6 +229,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Users */
+        get: operations["list_users_api_v1_admin_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/weekly": {
         parameters: {
             query?: never;
@@ -377,6 +394,8 @@ export interface components {
              * @description Set assignee user id; omit field to leave unchanged; null clears assignment
              */
             assigned_to_id?: number | null;
+            /** Reason */
+            reason?: string | null;
         };
         /** TicketAssign */
         TicketAssign: {
@@ -431,7 +450,7 @@ export interface components {
          * TicketStatus
          * @enum {string}
          */
-        TicketStatus: "open" | "assigned" | "in_progress" | "resolved" | "escalated";
+        TicketStatus: "open" | "assigned" | "in_progress" | "resolved" | "escalated" | "archived";
         /** TicketUpdateTech */
         TicketUpdateTech: {
             status?: components["schemas"]["TicketStatus"] | null;
@@ -477,7 +496,7 @@ export interface components {
          * UserRole
          * @enum {string}
          */
-        UserRole: "end_user" | "it_support" | "admin";
+        UserRole: "user" | "it_support" | "admin";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -928,6 +947,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    list_users_api_v1_admin_users_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPublic"][];
                 };
             };
         };

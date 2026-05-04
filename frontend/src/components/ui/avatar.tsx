@@ -8,7 +8,7 @@ function initials(name: string) {
 
 const ring: Record<Role, string> = {
   user: "ring-zinc-500",
-  technician: "ring-cyan-500",
+  it_support: "ring-cyan-500",
   admin: "ring-fuchsia-500",
 };
 

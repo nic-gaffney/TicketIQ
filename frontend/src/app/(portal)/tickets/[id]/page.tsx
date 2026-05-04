@@ -8,7 +8,7 @@ import { AlertTriangle, ArrowLeft } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useTickets } from "@/contexts/ticket-context";
 import { useToast } from "@/contexts/toast-context";
-import { userById } from "@/lib/mock-data";
+// import { userById } from "@/lib/mock-data";
 import { isAdmin, isItSupport } from "@/lib/roles";
 import { AIClassificationBlock } from "@/components/tickets/ai-classification-block";
 import { AttachmentPreview } from "@/components/tickets/attachment-preview";
@@ -51,7 +51,7 @@ export default function TicketDetailPage() {
   const [resolveModal, setResolveModal] = useState(false);
   const [resolutionSummary, setResolutionSummary] = useState("");
 
-  const submitter = ticket ? userById(ticket.submittedBy) : undefined;
+  const submitter = ticket ? ticket.submittedBy : undefined;
 
   const queueRank = useMemo(() => {
     if (!ticket) return null;
@@ -283,7 +283,7 @@ export default function TicketDetailPage() {
               <div>
                 <dt className="text-[var(--text-secondary)]">Submitted by</dt>
                 <dd className="font-medium text-[var(--text-primary)]">
-                  {apiTicket.submitter?.full_name ?? submitter?.name ?? ticket.submittedBy}
+                  {apiTicket.submitter?.full_name ?? submitter ?? ticket.submittedBy}
                 </dd>
               </div>
               <div>

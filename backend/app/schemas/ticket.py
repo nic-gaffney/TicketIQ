@@ -31,6 +31,7 @@ class TicketAdminOverride(BaseModel):
         default=None,
         description="Set assignee user id; omit field to leave unchanged; null clears assignment",
     )
+    reason: str | None = None
 
 
 class TicketOut(BaseModel):

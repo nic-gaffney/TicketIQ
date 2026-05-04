@@ -166,7 +166,7 @@ export default function DashboardPage() {
     },
   ];
 
-  if (!user || user.role !== "end_user") {
+  if (!user || user.role !== "user") {
     return (
       <div className="flex min-h-[40vh] items-center justify-center text-[var(--text-secondary)]">
         Redirecting…

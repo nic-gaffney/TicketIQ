@@ -39,4 +39,4 @@ test:
 
 # --- Production ---------------------------------------------------------------
 prod-up:
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile production up --build -d  

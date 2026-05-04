@@ -1,6 +1,6 @@
+# TLS is terminated by Cloudflare; nginx only needs to listen on port 80.
 services:
   db:
-    # No host-port exposure in production; only reachable inside the Docker network.
     ports: []
     restart: always
 
@@ -8,7 +8,6 @@ services:
     build:
       target: production
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-    # Source-code bind-mount is dev-only; production runs from the image.
     volumes: []
     ports: []
     restart: always
@@ -16,19 +15,14 @@ services:
   frontend:
     build:
       target: production
-    # Source-code bind-mount and anonymous node_modules volume are dev-only.
     volumes: []
     ports: []
     restart: always
 
   nginx:
-    # Activate the nginx service (it is gated behind the "production" profile in the base file).
     profiles: []
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ${SSL_CERT_PATH}:/etc/nginx/certs/fullchain.pem:ro
-      - ${SSL_KEY_PATH}:/etc/nginx/certs/privkey.pem:ro
     restart: always
