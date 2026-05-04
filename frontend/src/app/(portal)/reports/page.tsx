@@ -1,98 +1,163 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { format } from "date-fns";
 import { Download } from "lucide-react";
-import { MOCK_AI_ACCURACY_SERIES, MOCK_WEEKLY_REPORT } from "@/lib/mock-data";
+import { useAuth } from "@/contexts/auth-context";
+import { useToast } from "@/contexts/toast-context";
+import {
+  apiFetchJson,
+  type WeeklyEscalationsDTO,
+  type WeeklyReportDTO,
+} from "@/lib/api-fetch";
 import { CategoryBarChart } from "@/components/charts/category-bar-chart";
-import { AIAccuracyTrend } from "@/components/charts/ai-accuracy-trend";
 
 export default function ReportsPage() {
-  const [week, setWeek] = useState("current");
-  const r = MOCK_WEEKLY_REPORT;
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [weekly, setWeekly] = useState<WeeklyReportDTO | null>(null);
+  const [escWk, setEscWk] = useState<WeeklyEscalationsDTO | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const w = await apiFetchJson<WeeklyReportDTO>("/api/v1/reports/weekly");
+      setWeekly(w);
+      if (user?.role === "admin") {
+        const e = await apiFetchJson<WeeklyEscalationsDTO>("/api/v1/reports/weekly-escalations");
+        setEscWk(e);
+      } else {
+        setEscWk(null);
+      }
+    } catch (err: unknown) {
+      toast({
+        title: "Failed to load reports",
+        description: err instanceof Error ? err.message : String(err),
+        kind: "error",
+      });
+      setWeekly(null);
+      setEscWk(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [toast, user?.role]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const deptChart = weekly
+    ? Object.entries(weekly.resolved_by_department).map(([category, count]) => ({
+        category,
+        count,
+      }))
+    : [];
+
+  const totalResolved = deptChart.reduce((s, x) => s + x.count, 0);
+
+  const exportCsv = () => {
+    if (!weekly) return;
+    const header = "department,count\n";
+    const body = Object.entries(weekly.resolved_by_department)
+      .map(([k, v]) => `${k},${v}`)
+      .join("\n");
+    const blob = new Blob([header + body], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ticketiq-weekly-resolved.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-3xl text-[var(--text-primary)]">Reports</h1>
-          <p className="text-[var(--text-secondary)]">Weekly executive rollup for IT leadership.</p>
+          <p className="text-[var(--text-secondary)]">
+            Weekly rollup from <code className="text-xs text-[var(--brand)]">/api/v1/reports/*</code>.
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-            value={week}
-            onChange={(e) => setWeek(e.target.value)}
-          >
-            <option value="current">Current week</option>
-            <option value="prev">Previous week</option>
-          </select>
           <button
             type="button"
-            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
+            disabled={loading}
+            onClick={() => void load()}
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           >
-            <Download className="h-4 w-4" />
-            Export PDF
+            Refresh
           </button>
           <button
             type="button"
-            className="inline-flex items-center gap-2 rounded-lg bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white"
+            disabled={!weekly}
+            onClick={exportCsv}
+            className="inline-flex items-center gap-2 rounded-lg bg-[var(--brand)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
           >
             <Download className="h-4 w-4" />
-            Export CSV
+            Export resolved CSV
           </button>
         </div>
       </div>
 
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-6">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-          Weekly summary
-        </h2>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Metric label="Tickets closed" value={r.resolvedTickets} />
-          <Metric label="Avg close time (hrs)" value={r.avgResolutionTimeHours} />
-          <Metric label="Escalations" value={r.escalationCount} />
-          <Metric label="SLA breach rate" value={`${(r.slaBreachRate * 100).toFixed(1)}%`} />
-          <Metric label="AI accuracy" value="94%" />
-          <Metric label="First contact resolution" value="81%" />
-        </div>
-      </div>
+      {loading ? (
+        <p className="text-sm text-[var(--text-secondary)]">Loading…</p>
+      ) : weekly ? (
+        <>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-6">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+              Weekly summary ({weekly.period_days} days)
+            </h2>
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">
+              Generated {format(new Date(weekly.generated_at), "PPpp")}
+            </p>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <Metric label="Tickets resolved (period)" value={totalResolved} />
+              <Metric label="Currently escalated" value={weekly.currently_escalated_count} />
+              <Metric
+                label="Auto-escalations (7d)"
+                value={escWk?.auto_escalations_last_7_days ?? "—"}
+              />
+            </div>
+          </div>
 
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-6 overflow-x-auto">
-        <h2 className="text-sm font-semibold text-[var(--text-primary)]">Team breakdown</h2>
-        <table className="mt-4 w-full min-w-[520px] text-sm">
-          <thead>
-            <tr className="border-b border-[var(--border)] text-[var(--text-secondary)]">
-              <th className="py-2 text-left">Team</th>
-              <th className="py-2 text-left">Resolved</th>
-              <th className="py-2 text-left">Avg time (h)</th>
-              <th className="py-2 text-left">SLA breaches</th>
-            </tr>
-          </thead>
-          <tbody>
-            {r.teamBreakdown.map((t) => (
-              <tr key={t.team} className="border-b border-[var(--border)]/60">
-                <td className="py-3">{t.team}</td>
-                <td className="py-3 font-mono">{t.resolved}</td>
-                <td className="py-3 font-mono">{t.avgTime}</td>
-                <td className="py-3 font-mono">{Math.round(t.resolved * r.slaBreachRate)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-6 overflow-x-auto">
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+              Resolved by department (assigned resolver)
+            </h2>
+            {deptChart.length === 0 ? (
+              <p className="mt-4 text-sm text-[var(--text-secondary)]">
+                No resolved tickets in this window with an assignee linked to a department.
+              </p>
+            ) : (
+              <table className="mt-4 w-full min-w-[400px] text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--border)] text-[var(--text-secondary)]">
+                    <th className="py-2 text-left">Department</th>
+                    <th className="py-2 text-left">Resolved count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deptChart.map((row) => (
+                    <tr key={row.category} className="border-b border-[var(--border)]/60">
+                      <td className="py-3">{row.category}</td>
+                      <td className="py-3 font-mono">{row.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-5">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Top categories</h3>
-          <CategoryBarChart
-            data={r.topCategories.map((x) => ({ category: x.category, count: x.count }))}
-          />
-        </div>
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-5">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">AI accuracy trend</h3>
-          <AIAccuracyTrend data={MOCK_AI_ACCURACY_SERIES} />
-        </div>
-      </div>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-5">
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Resolved by department (chart)</h3>
+            <CategoryBarChart data={deptChart.length ? deptChart : [{ category: "—", count: 0 }]} />
+          </div>
+        </>
+      ) : (
+        <p className="text-sm text-[var(--text-secondary)]">No report data.</p>
+      )}
     </div>
   );
 }

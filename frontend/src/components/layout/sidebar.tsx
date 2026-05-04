@@ -97,6 +97,7 @@ export function Sidebar() {
     }
     return [
       { href: "/admin/overview", label: "Overview", icon: LayoutDashboard },
+      { href: "/admin/tickets", label: "Tickets", icon: ClipboardList },
       { href: "/admin/ai-config", label: "AI Config", icon: Cpu },
       { href: "/admin/audit-log", label: "Audit Log", icon: FileText },
       { href: "/admin/escalation-rules", label: "Escalation Rules", icon: Shield },

@@ -27,7 +27,8 @@ type AuthContextValue = {
   user:    UserPublic | null;
   loading: boolean;
   error:   string | null;
-  login:   (email: string, password: string) => Promise<boolean>;
+  /** Returns the signed-in user on success, or `null` on failure. */
+  login:   (email: string, password: string) => Promise<UserPublic | null>;
   logout:  () => void;
 };
 
@@ -58,7 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+  const login = useCallback(async (email: string, password: string): Promise<UserPublic | null> => {
     setError(null);
     setLoading(true);
     try {
@@ -68,15 +69,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (error || !data) {
         setError("Invalid email or password");
-        return false;
+        return null;
       }
 
       localStorage.setItem(TOKEN_KEY, data.access_token);
       setUser(data.user);
-      return true;
+      return data.user;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Login failed");
-      return false;
+      return null;
     } finally {
       setLoading(false);
     }

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { debounce } from "@/lib/utils";
 import { SearchInput } from "@/components/ui/search-input";
 import { useTickets } from "@/contexts/ticket-context";
+import { ticketFromApi } from "@/lib/types";
 
 export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { tickets } = useTickets();
@@ -33,12 +34,14 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const hitCount = useMemo(() => {
     if (!debouncedQ.trim()) return 0;
     const s = debouncedQ.toLowerCase();
-    return tickets.filter(
-      (t) =>
-        t.ticketId.toLowerCase().includes(s) ||
-        t.title.toLowerCase().includes(s) ||
-        t.description.toLowerCase().includes(s),
-    ).length;
+    return tickets
+      .map(ticketFromApi)
+      .filter(
+        (t) =>
+          t.ticketId.toLowerCase().includes(s) ||
+          t.title.toLowerCase().includes(s) ||
+          t.description.toLowerCase().includes(s),
+      ).length;
   }, [debouncedQ, tickets]);
 
   return (

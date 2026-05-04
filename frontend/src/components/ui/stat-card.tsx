@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import type { LucideIcon } from "lucide-react";
 
@@ -8,6 +9,7 @@ export function StatCard({
   delta,
   trend,
   className,
+  href,
 }: {
   label: string;
   value: string | number;
@@ -15,11 +17,14 @@ export function StatCard({
   delta?: string;
   trend?: "up" | "down" | "flat";
   className?: string;
+  /** When set, the whole card navigates (e.g. drill-down to a filtered ticket list). */
+  href?: string;
 }) {
-  return (
+  const inner = (
     <div
       className={cn(
         "rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-4 shadow-card transition-all duration-200 hover:-translate-y-px hover:border-[var(--brand)]/35 hover:shadow-lift",
+        href && "cursor-pointer",
         className,
       )}
     >
@@ -50,4 +55,17 @@ export function StatCard({
       </div>
     </div>
   );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="block no-underline text-inherit outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--dark-bg)]"
+      >
+        {inner}
+      </Link>
+    );
+  }
+
+  return inner;
 }

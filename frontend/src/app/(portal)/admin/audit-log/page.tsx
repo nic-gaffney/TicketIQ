@@ -4,16 +4,17 @@ import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { useTickets } from "@/contexts/ticket-context";
-import { MOCK_USERS } from "@/lib/mock-data";
+import type { components } from "@/lib/api.types";
 import { Badge } from "@/components/ui/badge";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { SearchInput } from "@/components/ui/search-input";
 import { StatCard } from "@/components/ui/stat-card";
-import type { AuditLog } from "@/lib/types";
 import { Activity, Shield, Zap } from "lucide-react";
 
-function actionVariant(
-  a: AuditLog["actionType"],
+type AuditRow = components["schemas"]["AuditLogOut"];
+
+function badgeVariantForAction(
+  action: string,
 ):
   | "action-classification"
   | "action-override"
@@ -22,65 +23,73 @@ function actionVariant(
   | "action-closure"
   | "action-login"
   | "action-reclassification" {
-  const map: Record<
-    AuditLog["actionType"],
-    | "action-classification"
-    | "action-override"
-    | "action-reassignment"
-    | "action-escalation"
-    | "action-closure"
-    | "action-login"
-    | "action-reclassification"
-  > = {
-    classification: "action-classification",
-    override: "action-override",
-    reassignment: "action-reassignment",
-    escalation: "action-escalation",
-    closure: "action-closure",
-    login: "action-login",
-    reclassification: "action-reclassification",
-  };
-  return map[a];
+  const u = action.toUpperCase();
+  if (u.includes("ADMIN") || u === "ADMIN_OVERRIDE") return "action-override";
+  if (u.includes("AUTO_ESCAL") || u.includes("ESCAL")) return "action-escalation";
+  if (u.includes("CLAIM") || u === "ASSIGN") return "action-reassignment";
+  if (u.includes("CREATED")) return "action-classification";
+  if (u.includes("RESOLV") || u === "IN_PROGRESS" || u === "STATUS_CHANGE") return "action-closure";
+  return "action-login";
 }
 
 export default function AuditLogPage() {
   const { auditLogs } = useTickets();
+  const rows = auditLogs as AuditRow[];
+
   const [q, setQ] = useState("");
   const [actor, setActor] = useState("all");
   const [actionFilter, setActionFilter] = useState<string>("all");
   const [page, setPage] = useState(0);
   const PAGE = 12;
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
+
+  const actionOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const a of rows) s.add(a.action);
+    return Array.from(s).sort();
+  }, [rows]);
+
+  const actorOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const a of rows) {
+      if (a.actor_user_id != null) s.add(String(a.actor_user_id));
+      else s.add("system");
+    }
+    return Array.from(s).sort();
+  }, [rows]);
 
   const stats = useMemo(() => {
-    const overrides = auditLogs.filter((a) => a.actionType === "override").length;
-    const esc = auditLogs.filter((a) => a.actionType === "escalation").length;
-    const cls = auditLogs.filter((a) => a.actionType === "classification").length;
-    return { total: auditLogs.length, overrides, esc, cls };
-  }, [auditLogs]);
+    const overrides = rows.filter((a) => a.action === "ADMIN_OVERRIDE").length;
+    const esc = rows.filter(
+      (a) => a.action === "AUTO_ESCALATE" || a.action.includes("ESCAL"),
+    ).length;
+    const cls = rows.filter((a) => a.action === "CREATED" || a.action.includes("CLASS")).length;
+    return { total: rows.length, overrides, esc, cls };
+  }, [rows]);
 
   const filtered = useMemo(() => {
-    return auditLogs.filter((a) => {
+    return rows.filter((a) => {
       if (q.trim()) {
         const s = q.toLowerCase();
-        const blob = `${a.logId} ${a.ticketId ?? ""} ${a.reason ?? ""} ${a.oldValue ?? ""} ${a.newValue ?? ""}`.toLowerCase();
+        const blob = `${a.id} ${a.ticket_id} ${a.action} ${a.actor_label} ${JSON.stringify(a.payload)} ${a.message ?? ""}`.toLowerCase();
         if (!blob.includes(s)) return false;
       }
-      if (actor !== "all" && a.actorId !== actor) return false;
-      if (actionFilter !== "all" && a.actionType !== actionFilter) return false;
+      const actorKey = a.actor_user_id != null ? String(a.actor_user_id) : "system";
+      if (actor !== "all" && actorKey !== actor) return false;
+      if (actionFilter !== "all" && a.action !== actionFilter) return false;
       return true;
     });
-  }, [auditLogs, q, actor, actionFilter]);
+  }, [rows, q, actor, actionFilter]);
 
   const slice = filtered.slice(page * PAGE, page * PAGE + PAGE);
 
   const exportCsv = () => {
-    const header = "timestamp,actor,action,ticketId,details\n";
+    const header = "id,created_at,actor_user_id,actor_label,action,ticket_id,message\n";
     const body = filtered
-      .map(
-        (a) =>
-          `${a.timestamp},${a.actorId},${a.actionType},${a.ticketId ?? ""},"${(a.reason ?? "").replace(/"/g, '""')}"`,
-      )
+      .map((a) => {
+        const msg = (a.message ?? "").replace(/"/g, '""');
+        return `${a.id},${a.created_at},${a.actor_user_id ?? ""},${a.actor_label},${a.action},${a.ticket_id},"${msg}"`;
+      })
       .join("\n");
     const blob = new Blob([header + body], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -96,7 +105,7 @@ export default function AuditLogPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-3xl text-[var(--text-primary)]">Audit log</h1>
-          <p className="text-[var(--text-secondary)]">Immutable trail of AI and human actions.</p>
+          <p className="text-[var(--text-secondary)]">Immutable trail from `/api/v1/audit`.</p>
         </div>
         <button
           type="button"
@@ -110,9 +119,9 @@ export default function AuditLogPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Total events" value={stats.total} icon={Activity} />
-        <StatCard label="Manual overrides" value={stats.overrides} icon={Shield} />
-        <StatCard label="Escalations" value={stats.esc} icon={Zap} />
-        <StatCard label="AI classifications" value={stats.cls} icon={Activity} />
+        <StatCard label="Admin overrides" value={stats.overrides} icon={Shield} />
+        <StatCard label="Escalation-related" value={stats.esc} icon={Zap} />
+        <StatCard label="Created / classify" value={stats.cls} icon={Activity} />
       </div>
 
       <FilterBar
@@ -130,12 +139,11 @@ export default function AuditLogPage() {
           onChange={(e) => setActor(e.target.value)}
         >
           <option value="all">All actors</option>
-          {MOCK_USERS.map((u) => (
-            <option key={u.userId} value={u.userId}>
-              {u.name}
+          {actorOptions.map((id) => (
+            <option key={id} value={id}>
+              {id === "system" ? "System" : `User #${id}`}
             </option>
           ))}
-          <option value="system">system</option>
         </select>
         <select
           className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm"
@@ -143,17 +151,7 @@ export default function AuditLogPage() {
           onChange={(e) => setActionFilter(e.target.value)}
         >
           <option value="all">All actions</option>
-          {(
-            [
-              "classification",
-              "override",
-              "reassignment",
-              "escalation",
-              "closure",
-              "login",
-              "reclassification",
-            ] as const
-          ).map((a) => (
+          {actionOptions.map((a) => (
             <option key={a} value={a}>
               {a}
             </option>
@@ -169,26 +167,22 @@ export default function AuditLogPage() {
               <th className="px-4 py-3 text-left">Timestamp</th>
               <th className="px-4 py-3 text-left">Actor</th>
               <th className="px-4 py-3 text-left">Action</th>
-              <th className="px-4 py-3 text-left">Ticket ID</th>
+              <th className="px-4 py-3 text-left">Ticket</th>
               <th className="px-4 py-3 text-left">Details</th>
             </tr>
           </thead>
           <tbody>
             {slice.map((a) => (
-              <Fragment key={a.logId}>
-                <tr
-                  className="border-b border-[var(--border)]/60 hover:bg-[var(--surface)]/40"
-                >
+              <Fragment key={a.id}>
+                <tr className="border-b border-[var(--border)]/60 hover:bg-[var(--surface)]/40">
                   <td className="px-2 py-3">
                     <button
                       type="button"
                       aria-label="Expand"
                       className="rounded p-1 hover:bg-[var(--surface)]"
-                      onClick={() =>
-                        setOpenId((id) => (id === a.logId ? null : a.logId))
-                      }
+                      onClick={() => setOpenId((id) => (id === a.id ? null : a.id))}
                     >
-                      {openId === a.logId ? (
+                      {openId === a.id ? (
                         <ChevronDown className="h-4 w-4" />
                       ) : (
                         <ChevronRight className="h-4 w-4" />
@@ -196,28 +190,25 @@ export default function AuditLogPage() {
                     </button>
                   </td>
                   <td className="px-4 py-3 font-mono text-xs">
-                    {new Date(a.timestamp).toLocaleString()}
+                    {new Date(a.created_at).toLocaleString()}
                   </td>
-                  <td className="px-4 py-3">{a.actorId}</td>
                   <td className="px-4 py-3">
-                    <Badge variant={actionVariant(a.actionType)}>
-                      {a.actionType.replace("_", " ")}
-                    </Badge>
+                    {a.actor_user_id != null ? `#${a.actor_user_id}` : "—"}{" "}
+                    <span className="text-[var(--text-secondary)]">({a.actor_label})</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Badge variant={badgeVariantForAction(a.action)}>{a.action}</Badge>
                   </td>
                   <td className="px-4 py-3 font-mono">
-                    {a.ticketId ? (
-                      <Link className="text-[var(--brand)] hover:underline" href={`/tickets/${a.ticketId}`}>
-                        {a.ticketId}
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
+                    <Link className="text-[var(--brand)] hover:underline" href={`/tickets/${a.ticket_id}`}>
+                      {a.ticket_id}
+                    </Link>
                   </td>
                   <td className="max-w-[280px] truncate px-4 py-3 text-[var(--text-secondary)]">
-                    {a.reason ?? `${a.oldValue ?? ""} → ${a.newValue ?? ""}`}
+                    {a.message ?? "—"}
                   </td>
                 </tr>
-                {openId === a.logId ? (
+                {openId === a.id ? (
                   <tr className="bg-[var(--surface)]/30">
                     <td colSpan={6} className="px-6 py-4 font-mono text-xs text-[var(--text-secondary)]">
                       <pre className="whitespace-pre-wrap">{JSON.stringify(a, null, 2)}</pre>

@@ -4,7 +4,22 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { useAuth } from "@/contexts/auth-context";
+import { useAuth, type UserPublic } from "@/contexts/auth-context";
+
+function homePathForRole(role: UserPublic["role"]): string {
+  if (role === "end_user") return "/dashboard";
+  if (role === "it_support") return "/technician/queue";
+  return "/admin/overview";
+}
+
+const DEMO_QUICK: Record<
+  "user" | "technician" | "admin",
+  { email: string; password: string }
+> = {
+  user: { email: "user@ticketiq.demo", password: "password123" },
+  technician: { email: "tech@ticketiq.demo", password: "password123" },
+  admin: { email: "admin@ticketiq.demo", password: "password123" },
+};
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -14,26 +29,28 @@ export default function LoginPage() {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const goRole = (role: "user" | "technician" | "admin") => {
-    loginAsDemo(role);
-    if (role === "user") router.push("/dashboard");
-    else if (role === "technician") router.push("/technician/queue");
-    else router.push("/admin/overview");
+  const goRole = async (role: "user" | "technician" | "admin") => {
+    setError(false);
+    const { email: em, password: pw } = DEMO_QUICK[role];
+    const u = await login(em, pw);
+    if (!u) {
+      setError(true);
+      return;
+    }
+    router.replace(homePathForRole(u.role));
   };
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(false);
-    setTimeout(() => {
-      const ok = login(email, password);
-      setLoading(false);
-      if (!ok) {
-        setError(true);
-        return;
-      }
-      router.push("/");
-    }, 400);
+    const u = await login(email, password);
+    setLoading(false);
+    if (!u) {
+      setError(true);
+      return;
+    }
+    router.replace(homePathForRole(u.role));
   };
 
   return (
