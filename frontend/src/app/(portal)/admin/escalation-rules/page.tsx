@@ -1,73 +1,99 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useToast } from "@/contexts/toast-context";
+import { useEffect, useState, useCallback } from "react";
+import createClient from "openapi-fetch";
+import type { paths, components } from "@/lib/api.types";
+import { getStoredToken } from "@/contexts/auth-context";
 import { useTickets } from "@/contexts/ticket-context";
-import {
-  apiFetchJson,
-  type EscalationConfigDTO,
-  type EscalationConfigPatch,
-  type RunEscalationCheckDTO,
-} from "@/lib/api-fetch";
+import { useToast } from "@/contexts/toast-context";
 import type { Severity, TicketStatus } from "@/lib/types";
+
+// ── API client (same pattern as ticket-context) ───────────────────────────────
+const apiClient = createClient<paths>({
+  baseUrl: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001",
+  headers: {
+    get Authorization() {
+      const token = getStoredToken();
+      return token ? `Bearer ${token}` : "";
+    },
+  },
+});
+
+type EscalationConfigOut = components["schemas"]["EscalationConfigOut"];
+type EscalationConfigUpdate = components["schemas"]["EscalationConfigUpdate"];
 
 export default function EscalationRulesPage() {
   const { toast } = useToast();
-  const { adminOverride, refresh } = useTickets();
+  const { tickets, adminOverride, updateTicketTech, runAutoEscalation, refresh } = useTickets();
 
-  const [loading, setLoading] = useState(true);
-  const [cfg, setCfg] = useState<EscalationConfigDTO | null>(null);
-  const [timeMin, setTimeMin] = useState(30);
-  const [intervalSec, setIntervalSec] = useState(300);
-  const [target, setTarget] = useState("");
+  // ── Config state loaded from API ──────────────────────────────────────────
+  const [config, setConfig] = useState<EscalationConfigOut | null>(null);
+  const [loadingConfig, setLoadingConfig] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // ── Form state ────────────────────────────────────────────────────────────
+  const [timeMin, setTimeMin] = useState(30);
+  const [intervalSec, setIntervalSec] = useState(300);
+  const [target, setTarget] = useState("it-manager@example.com");
+
+  // ── Override state ────────────────────────────────────────────────────────
   const [ticketId, setTicketId] = useState("");
   const [ovSev, setOvSev] = useState<Severity>("medium");
   const [ovStatus, setOvStatus] = useState<TicketStatus>("in_progress");
-  const [runBusy, setRunBusy] = useState(false);
+  const [reason, setReason] = useState("");
+  const [overriding, setOverriding] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // ── Running manual check ──────────────────────────────────────────────────
+  const [runningCheck, setRunningCheck] = useState(false);
+
+  // ── Fetch config from API on mount ────────────────────────────────────────
+  const fetchConfig = useCallback(async () => {
+    setLoadingConfig(true);
     try {
-      const c = await apiFetchJson<EscalationConfigDTO>("/api/v1/admin/escalation");
-      setCfg(c);
-      setTimeMin(c.high_unassigned_threshold_minutes);
-      setIntervalSec(c.job_interval_seconds);
-      setTarget(c.notification_target);
-    } catch (e: unknown) {
+      const { data, error } = await apiClient.GET("/api/v1/admin/escalation");
+      if (error) throw new Error(JSON.stringify(error));
+      setConfig(data);
+      setTimeMin(data.high_unassigned_threshold_minutes);
+      setIntervalSec(data.job_interval_seconds);
+      setTarget(data.notification_target);
+    } catch (e) {
       toast({
         title: "Failed to load escalation config",
-        description: e instanceof Error ? e.message : String(e),
+        description: e instanceof Error ? e.message : "Unknown error",
         kind: "error",
       });
     } finally {
-      setLoading(false);
+      setLoadingConfig(false);
     }
   }, [toast]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    fetchConfig();
+  }, [fetchConfig]);
 
+  // ── Save config to API ────────────────────────────────────────────────────
   const save = async () => {
     setSaving(true);
     try {
-      const body: EscalationConfigPatch = {
+      const body: EscalationConfigUpdate = {
         high_unassigned_threshold_minutes: timeMin,
         job_interval_seconds: intervalSec,
-        notification_target: target || null,
+        notification_target: target,
       };
-      const c = await apiFetchJson<EscalationConfigDTO>("/api/v1/admin/escalation", {
-        method: "PATCH",
-        body: JSON.stringify(body),
+      const { data, error } = await apiClient.PATCH("/api/v1/admin/escalation", {
+        body,
       });
-      setCfg(c);
-      toast({ title: "Configuration saved", kind: "success" });
-    } catch (e: unknown) {
+      if (error) throw new Error(JSON.stringify(error));
+      setConfig(data);
       toast({
-        title: "Save failed",
-        description: e instanceof Error ? e.message : String(e),
+        title: "Configuration saved",
+        description: `Threshold: ${timeMin} min — Interval: ${intervalSec}s`,
+        kind: "success",
+      });
+    } catch (e) {
+      toast({
+        title: "Failed to save configuration",
+        description: e instanceof Error ? e.message : "Unknown error",
         kind: "error",
       });
     } finally {
@@ -75,213 +101,242 @@ export default function EscalationRulesPage() {
     }
   };
 
-  const runCheck = async () => {
-    setRunBusy(true);
+  // ── Manual escalation check ───────────────────────────────────────────────
+  const handleRunCheck = async () => {
+    setRunningCheck(true);
     try {
-      const r = await apiFetchJson<RunEscalationCheckDTO>("/api/v1/admin/escalation/run-check", {
-        method: "POST",
-      });
-      await refresh();
+      await runAutoEscalation();
       toast({
         title: "Escalation check complete",
-        description: `${r.tickets_escalated} ticket(s) escalated`,
+        description: "Eligible tickets have been escalated.",
         kind: "success",
       });
-    } catch (e: unknown) {
+    } catch (e) {
       toast({
-        title: "Run check failed",
-        description: e instanceof Error ? e.message : String(e),
+        title: "Escalation check failed",
+        description: e instanceof Error ? e.message : "Unknown error",
         kind: "error",
       });
     } finally {
-      setRunBusy(false);
+      setRunningCheck(false);
     }
   };
 
+  // ── Admin override ────────────────────────────────────────────────────────
   const submitOverride = async () => {
-    const id = Number.parseInt(ticketId.trim(), 10);
-    if (!Number.isFinite(id)) {
-      toast({ title: "Enter a numeric ticket ID", kind: "warning" });
+    const id = parseInt(ticketId.trim(), 10);
+    if (!ticketId.trim() || isNaN(id)) {
+      toast({ title: "Invalid ticket ID", kind: "error" });
       return;
     }
-    const sev =
-      ovSev === "critical" ? ("high" as const) : (ovSev as "low" | "medium" | "high");
+    setOverriding(true);
     try {
       await adminOverride(id, {
-        severity: sev,
-        status: ovStatus,
+        severity: ovSev as components["schemas"]["Severity"],
+        reason: reason || "Manual escalation panel override",
       });
-      setTicketId("");
+      await updateTicketTech(id, { status: ovStatus as components["schemas"]["TicketStatus"] });
       await refresh();
-      toast({ title: "Override applied", kind: "success" });
-    } catch (e: unknown) {
+      toast({ title: "Override recorded", kind: "success" });
+      setTicketId("");
+      setReason("");
+    } catch (e) {
       toast({
         title: "Override failed",
-        description: e instanceof Error ? e.message : String(e),
+        description: e instanceof Error ? e.message : "Unknown error",
         kind: "error",
       });
+    } finally {
+      setOverriding(false);
     }
   };
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-8">
       <div>
         <h1 className="font-display text-3xl text-[var(--text-primary)]">Escalation rules</h1>
         <p className="text-[var(--text-secondary)]">
-          Thresholds and job interval from `/api/v1/admin/escalation`. Manual ticket overrides use
-          admin + tech APIs.
+          Policy thresholds tied to NOC paging and manager workflows.
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          disabled={runBusy}
-          onClick={() => void runCheck()}
-          className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:border-[var(--brand)]/50 disabled:opacity-50"
-        >
-          {runBusy ? "Running…" : "Run escalation check now"}
-        </button>
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => void load()}
-          className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-        >
-          Reload config
-        </button>
+      {/* ── Config form ── */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-6 space-y-4 max-w-xl">
+        {loadingConfig ? (
+          <p className="text-sm text-[var(--text-secondary)]">Loading configuration...</p>
+        ) : (
+          <>
+            {/* Last updated info */}
+            {config && (
+              <p className="text-xs text-[var(--text-secondary)]">
+                Last updated: {new Date(config.updated_at).toLocaleString()}
+              </p>
+            )}
+
+            <div>
+              <label className="text-xs uppercase text-[var(--text-secondary)]">
+                Time threshold (minutes)
+              </label>
+              <input
+                type="number"
+                className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 font-mono"
+                value={timeMin}
+                min={1}
+                onChange={(e) => setTimeMin(Number(e.target.value))}
+              />
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                High severity tickets unassigned beyond this threshold are auto-escalated.
+              </p>
+            </div>
+
+            <div>
+              <label className="text-xs uppercase text-[var(--text-secondary)]">
+                Check interval (seconds)
+              </label>
+              <input
+                type="number"
+                className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 font-mono"
+                value={intervalSec}
+                min={60}
+                onChange={(e) => setIntervalSec(Number(e.target.value))}
+              />
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                How often the escalation job runs. Default: 300s (5 min).
+              </p>
+            </div>
+
+            <div>
+              <label className="text-xs uppercase text-[var(--text-secondary)]">
+                Notification target
+              </label>
+              <input
+                type="text"
+                className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                placeholder="it-manager@example.com"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={save}
+                disabled={saving}
+                className="flex-1 rounded-lg bg-[var(--brand)] py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Save configuration"}
+              </button>
+              <button
+                type="button"
+                onClick={handleRunCheck}
+                disabled={runningCheck}
+                className="flex-1 rounded-lg border border-[var(--brand)] py-2.5 text-sm font-semibold text-[var(--brand)] hover:bg-[var(--surface)] disabled:opacity-50"
+              >
+                {runningCheck ? "Running..." : "Run check now"}
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
-      <div className="max-w-xl space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-6">
-        {loading ? (
-          <p className="text-sm text-[var(--text-secondary)]">Loading…</p>
-        ) : cfg ? (
-          <p className="text-xs text-[var(--text-secondary)]">
-            Last updated: {new Date(cfg.updated_at).toLocaleString()}
-          </p>
-        ) : null}
-        <div>
-          <label className="text-xs uppercase text-[var(--text-secondary)]">
-            High severity unassigned threshold (minutes)
-          </label>
-          <input
-            type="number"
-            min={1}
-            max={1440}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 font-mono"
-            value={timeMin}
-            onChange={(e) => setTimeMin(Number(e.target.value))}
-          />
+      {/* ── Current config summary ── */}
+      {config && (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-6 max-w-xl">
+          <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-4">
+            Active configuration
+          </h2>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p className="text-xs text-[var(--text-secondary)] uppercase">Severity threshold</p>
+              <p className="font-mono mt-1 capitalize">High</p>
+            </div>
+            <div>
+              <p className="text-xs text-[var(--text-secondary)] uppercase">Time threshold</p>
+              <p className="font-mono mt-1">{config.high_unassigned_threshold_minutes} min</p>
+            </div>
+            <div>
+              <p className="text-xs text-[var(--text-secondary)] uppercase">Check interval</p>
+              <p className="font-mono mt-1">{config.job_interval_seconds}s</p>
+            </div>
+            <div>
+              <p className="text-xs text-[var(--text-secondary)] uppercase">Notification target</p>
+              <p className="font-mono mt-1 truncate">{config.notification_target}</p>
+            </div>
+          </div>
         </div>
-        <div>
-          <label className="text-xs uppercase text-[var(--text-secondary)]">
-            Background job interval (seconds)
-          </label>
-          <input
-            type="number"
-            min={60}
-            max={3600}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 font-mono"
-            value={intervalSec}
-            onChange={(e) => setIntervalSec(Number(e.target.value))}
-          />
-        </div>
-        <div>
-          <label className="text-xs uppercase text-[var(--text-secondary)]">Notification target</label>
-          <input
-            type="text"
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            placeholder="e.g. it-manager@example.com"
-          />
-        </div>
-        <button
-          type="button"
-          disabled={saving || loading}
-          onClick={() => void save()}
-          className="w-full rounded-lg bg-[var(--brand)] py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save configuration"}
-        </button>
-      </div>
+      )}
 
-      <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-6">
-        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Current configuration</h2>
-        <table className="mt-4 w-full min-w-[480px] text-sm">
-          <thead>
-            <tr className="border-b border-[var(--border)] text-[var(--text-secondary)]">
-              <th className="py-2 text-left">Field</th>
-              <th className="py-2 text-left">Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="border-b border-[var(--border)]/60">
-              <td className="py-3">High unassigned threshold (min)</td>
-              <td className="py-3 font-mono">{cfg?.high_unassigned_threshold_minutes ?? "—"}</td>
-            </tr>
-            <tr className="border-b border-[var(--border)]/60">
-              <td className="py-3">Job interval (sec)</td>
-              <td className="py-3 font-mono">{cfg?.job_interval_seconds ?? "—"}</td>
-            </tr>
-            <tr className="border-b border-[var(--border)]/60">
-              <td className="py-3">Notification target</td>
-              <td className="py-3">{cfg?.notification_target ?? "—"}</td>
-            </tr>
-            <tr>
-              <td className="py-3">Updated</td>
-              <td className="py-3 font-mono text-xs">
-                {cfg ? new Date(cfg.updated_at).toLocaleString() : "—"}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div className="max-w-xl space-y-4 rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-6">
-        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Manual ticket override</h2>
+      {/* ── Manual override panel ── */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-6 space-y-4 max-w-xl">
+        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Manual override</h2>
         <p className="text-xs text-[var(--text-secondary)]">
-          Applies{" "}
-          <code className="text-[var(--brand)]">{"PATCH /api/v1/tickets/{id}/admin"}</code> for severity and
-          status.
+          Override severity and status for a specific ticket. Action is recorded in the audit log.
         </p>
+
         <input
           className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 font-mono text-sm"
           placeholder="Ticket ID (number)"
           value={ticketId}
           onChange={(e) => setTicketId(e.target.value)}
         />
+
         <div className="grid gap-3 sm:grid-cols-2">
-          <select
-            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-            value={ovSev}
-            onChange={(e) => setOvSev(e.target.value as Severity)}
-          >
-            {(["low", "medium", "high", "critical"] as const).map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <select
-            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-            value={ovStatus}
-            onChange={(e) => setOvStatus(e.target.value as TicketStatus)}
-          >
-            {(["open", "assigned", "in_progress", "escalated", "resolved"] as const).map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+          <div>
+            <label className="text-xs text-[var(--text-secondary)] uppercase">Override severity</label>
+            <select
+              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+              value={ovSev}
+              onChange={(e) => setOvSev(e.target.value as Severity)}
+            >
+              {(["low", "medium", "high"] as const).map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-[var(--text-secondary)] uppercase">Override status</label>
+            <select
+              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+              value={ovStatus}
+              onChange={(e) => setOvStatus(e.target.value as TicketStatus)}
+            >
+              {(["open", "assigned", "in_progress", "escalated", "resolved"] as const).map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
         </div>
+
+        <textarea
+          className="min-h-[80px] w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+          placeholder="Reason for override (required for audit log)"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+
         <button
           type="button"
-          onClick={() => void submitOverride()}
-          className="w-full rounded-lg border border-[var(--brand)] py-2 text-sm font-semibold text-[var(--brand)] hover:bg-[var(--surface)]"
+          onClick={submitOverride}
+          disabled={overriding || !ticketId.trim()}
+          className="w-full rounded-lg border border-[var(--brand)] py-2 text-sm font-semibold text-[var(--brand)] hover:bg-[var(--surface)] disabled:opacity-50"
         >
-          Submit override
+          {overriding ? "Submitting..." : "Submit override"}
         </button>
+      </div>
+
+      {/* ── Escalated tickets live count ── */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-6 max-w-xl">
+        <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-2">
+          Current escalated tickets
+        </h2>
+        <p className="text-4xl font-bold text-red-400">
+          {tickets.filter((t) => t.status === "escalated").length}
+        </p>
+        <p className="text-xs text-[var(--text-secondary)] mt-1">
+          tickets currently in escalated status
+        </p>
       </div>
     </div>
   );

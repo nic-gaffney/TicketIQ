@@ -73,7 +73,7 @@ export default function TicketDetailPage() {
     if (user && (isItSupport(user.role) || isAdmin(user.role))) {
       m.set(user.id, `${user.full_name} (you)`);
     }
-    return Array.from(m.entries()).map(([assigneeId, name]) => ({ id: assigneeId, name }));
+    return [...m.entries()].map(([assigneeId, name]) => ({ id: assigneeId, name }));
   }, [tickets, user]);
 
   if (!id || !user || !ticket || !apiTicket) {
