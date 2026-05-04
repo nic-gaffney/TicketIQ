@@ -6,8 +6,6 @@
   <a href="https://github.com/nic-gaffney/TicketIQ/actions/workflows/ci.yml">
     <img src="https://github.com/nic-gaffney/TicketIQ/actions/workflows/ci.yml/badge.svg" alt="CI"/>
   </a>
-  <img src="https://img.shields.io/badge/tests-38%20passed-brightgreen?style=flat-square" alt="Tests"/>
-  <img src="https://img.shields.io/badge/coverage-98%25-brightgreen?style=flat-square" alt="Coverage"/>
   <img src="https://img.shields.io/badge/python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/next.js-14-000000?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js"/>
   <img src="https://img.shields.io/badge/license-UTD%20CS3354-E1007A?style=flat-square" alt="License"/>
