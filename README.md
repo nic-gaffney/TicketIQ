@@ -1,4 +1,9 @@
 # TicketIQ
+[![CI](https://github.com/nic-gaffney/TicketIQ/actions/workflows/ci.yml/badge.svg)](https://github.com/nic-gaffney/TicketIQ/actions/workflows/ci.yml)
+![Tests](https://img.shields.io/badge/tests-38%20passed-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-98%25-brightgreen)
+![Python](https://img.shields.io/badge/python-3.12-blue)
+![Next.js](https://img.shields.io/badge/next.js-14-black)
 
 An AI-powered IT helpdesk ticket management and prioritization system built for T-Mobile. TicketIQ allows users to submit IT support tickets, which are automatically analyzed using NLP to determine severity and urgency, then placed in a priority queue for IT technicians.
 
