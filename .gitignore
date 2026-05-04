@@ -4,6 +4,7 @@
 .env
 .env.local
 .env.*.local
+infra/certs
 
 # Python
 __pycache__/
