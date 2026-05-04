@@ -2,18 +2,18 @@
 test_rinin.py — PA4 Functional Test Cases
 ==========================================
 Covers 10 functional test cases using FastAPI's async test client
-and an in-memory SQLite database (no external DB required).
+against the real PostgreSQL database (same as CI environment).
 
 Rinin's 5:    FTC-31, FTC-34, FTC-35, FTC-39, FTC-40
 Teammates' 5: FTC-03, FTC-04, FTC-05, FTC-45, FTC-46
 """
 
 import io
+import os
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.main import app
 from app.db.session import get_db
@@ -23,16 +23,15 @@ from app.models.ticket import Ticket, TicketStatus, Severity, Urgency
 from app.core.security import hash_password, create_access_token
 
 # ---------------------------------------------------------------------------
-# Test database setup (in-memory SQLite, no Postgres needed)
+# Use the real Postgres DB (already running in CI via docker service)
 # ---------------------------------------------------------------------------
 
-DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-
-engine = create_async_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql+asyncpg://appuser:apppassword@localhost:5432/appdb",
 )
+
+engine = create_async_engine(DATABASE_URL, echo=False)
 TestingSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
