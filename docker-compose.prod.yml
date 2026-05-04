@@ -15,9 +15,13 @@ services:
   frontend:
     build:
       target: production
+      args:
+        NEXT_PUBLIC_API_URL: https://ticketiq.ngaffney.dev   
+    restart: always
     volumes: []
     ports: []
-    restart: always
+    environment:
+      - NEXT_PUBLIC_API_URL=https://ticketiq.ngaffney.dev
 
   nginx:
     profiles: []

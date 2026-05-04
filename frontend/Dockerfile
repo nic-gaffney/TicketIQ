@@ -21,6 +21,8 @@ CMD ["npm", "run", "dev"]
 
 # ─── Builder ─────────────────────────────────────────────────────────────────
 FROM base AS builder
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
