@@ -4,7 +4,7 @@ test_rinin.py — PA4 Functional Test Cases
 Covers 10 functional test cases using FastAPI's async test client
 and an in-memory SQLite database (no external DB required).
 
-Rinin's 5:   FTC-31, FTC-34, FTC-35, FTC-39, FTC-40
+Rinin's 5:    FTC-31, FTC-34, FTC-35, FTC-39, FTC-40
 Teammates' 5: FTC-03, FTC-04, FTC-05, FTC-45, FTC-46
 """
 
@@ -19,7 +19,7 @@ from app.main import app
 from app.db.session import get_db
 from app.db.base import Base
 from app.models.user import User, UserRole
-from app.models.ticket import Ticket, TicketStatus, TicketCategory, TicketSeverity, TicketUrgency
+from app.models.ticket import Ticket, TicketStatus, Severity, Urgency
 from app.core.security import hash_password, create_access_token
 
 # ---------------------------------------------------------------------------
@@ -82,23 +82,6 @@ async def technician_user(db_session: AsyncSession):
 
 
 @pytest_asyncio.fixture()
-async def admin_user(db_session: AsyncSession):
-    """Create an admin user and return (user, token)."""
-    user = User(
-        email="admin@example.com",
-        hashed_password=hash_password("Admin@1234"),
-        full_name="Admin User",
-        role=UserRole.admin,
-        is_active=True,
-    )
-    db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
-    token = create_access_token(str(user.id))
-    return user, token
-
-
-@pytest_asyncio.fixture()
 async def end_user(db_session: AsyncSession):
     """Create a regular end user and return (user, token)."""
     user = User(
@@ -117,38 +100,38 @@ async def end_user(db_session: AsyncSession):
 
 @pytest_asyncio.fixture()
 async def sample_tickets(db_session: AsyncSession, end_user):
-    """Create a set of tickets with varying priority scores for sorting tests."""
+    """Create tickets with varying priority scores for sorting tests."""
     user, _ = end_user
     tickets = [
         Ticket(
-            title="Network outage",
-            description="Complete network failure",
-            category=TicketCategory.network,
-            severity=TicketSeverity.high,
-            urgency=TicketUrgency.high,
+            description="Complete network failure affecting all offices",
+            affected_system="Core Network Switch",
+            category="network",
+            severity=Severity.high,
+            urgency=Urgency.high,
             priority_score=90,
             status=TicketStatus.open,
-            created_by=user.id,
+            submitted_by_id=user.id,
         ),
         Ticket(
-            title="Slow laptop",
-            description="Laptop running slowly",
-            category=TicketCategory.hardware,
-            severity=TicketSeverity.low,
-            urgency=TicketUrgency.low,
+            description="Laptop running slowly after update",
+            affected_system="Dell XPS Laptop",
+            category="hardware",
+            severity=Severity.low,
+            urgency=Urgency.low,
             priority_score=20,
             status=TicketStatus.open,
-            created_by=user.id,
+            submitted_by_id=user.id,
         ),
         Ticket(
-            title="Email not loading",
-            description="Cannot access email",
-            category=TicketCategory.software,
-            severity=TicketSeverity.medium,
-            urgency=TicketUrgency.medium,
+            description="Cannot access email client",
+            affected_system="Outlook",
+            category="software",
+            severity=Severity.medium,
+            urgency=Urgency.medium,
             priority_score=55,
             status=TicketStatus.open,
-            created_by=user.id,
+            submitted_by_id=user.id,
         ),
     ]
     for t in tickets:
@@ -163,24 +146,24 @@ async def escalated_tickets(db_session: AsyncSession, end_user):
     user, _ = end_user
     tickets = [
         Ticket(
-            title="Escalated issue",
-            description="This was escalated",
-            category=TicketCategory.network,
-            severity=TicketSeverity.high,
-            urgency=TicketUrgency.high,
+            description="This was escalated due to SLA breach",
+            affected_system="VPN Gateway",
+            category="network",
+            severity=Severity.high,
+            urgency=Urgency.high,
             priority_score=95,
             status=TicketStatus.escalated,
-            created_by=user.id,
+            submitted_by_id=user.id,
         ),
         Ticket(
-            title="Open issue",
-            description="Just opened",
-            category=TicketCategory.software,
-            severity=TicketSeverity.low,
-            urgency=TicketUrgency.low,
+            description="Minor software glitch",
+            affected_system="CRM App",
+            category="software",
+            severity=Severity.low,
+            urgency=Urgency.low,
             priority_score=15,
             status=TicketStatus.open,
-            created_by=user.id,
+            submitted_by_id=user.id,
         ),
     ]
     for t in tickets:
@@ -191,17 +174,17 @@ async def escalated_tickets(db_session: AsyncSession, end_user):
 
 @pytest_asyncio.fixture()
 async def open_ticket(db_session: AsyncSession, end_user):
-    """Create a single open ticket."""
+    """Create a single open ticket for status-change tests."""
     user, _ = end_user
     ticket = Ticket(
-        title="Test ticket",
         description="A test ticket for status changes",
-        category=TicketCategory.software,
-        severity=TicketSeverity.medium,
-        urgency=TicketUrgency.medium,
+        affected_system="Test System",
+        category="software",
+        severity=Severity.medium,
+        urgency=Urgency.medium,
         priority_score=50,
         status=TicketStatus.open,
-        created_by=user.id,
+        submitted_by_id=user.id,
     )
     db_session.add(ticket)
     await db_session.commit()
@@ -217,7 +200,7 @@ async def open_ticket(db_session: AsyncSession, end_user):
 async def test_ftc03_invalid_login_returns_401(end_user):
     """
     FTC-03: POST /auth/login with wrong password → 401 Unauthorized.
-    Verifies the system rejects bad credentials with the correct error code.
+    Verifies the system rejects bad credentials.
     """
     user, _ = end_user
     async with AsyncClient(
@@ -240,7 +223,7 @@ async def test_ftc03_invalid_login_returns_401(end_user):
 async def test_ftc04_valid_ticket_submission_returns_201(end_user):
     """
     FTC-04: POST /tickets with all required fields → 201 Created.
-    Verifies a valid ticket is accepted and stored by the system.
+    Verifies a valid ticket is accepted and stored.
     """
     user, token = end_user
     async with AsyncClient(
@@ -249,8 +232,8 @@ async def test_ftc04_valid_ticket_submission_returns_201(end_user):
         response = await client.post(
             "/api/v1/tickets",
             json={
-                "title": "Printer not working",
-                "description": "The office printer throws a paper jam error.",
+                "description": "The office printer throws a paper jam error on tray 2.",
+                "affected_system": "HP LaserJet 4000",
                 "category": "hardware",
             },
             headers={"Authorization": f"Bearer {token}"},
@@ -259,7 +242,6 @@ async def test_ftc04_valid_ticket_submission_returns_201(end_user):
         f"Expected 201 for valid ticket, got {response.status_code}: {response.text}"
     )
     data = response.json()
-    assert data["title"] == "Printer not working"
     assert "id" in data
 
 
@@ -271,7 +253,7 @@ async def test_ftc04_valid_ticket_submission_returns_201(end_user):
 async def test_ftc05_ticket_missing_description_returns_422(end_user):
     """
     FTC-05: POST /tickets without a description → 422 Unprocessable Entity.
-    Verifies the system enforces required fields on ticket submission.
+    Verifies the system enforces required fields.
     """
     user, token = end_user
     async with AsyncClient(
@@ -279,7 +261,7 @@ async def test_ftc05_ticket_missing_description_returns_422(end_user):
     ) as client:
         response = await client.post(
             "/api/v1/tickets",
-            json={"title": "Missing description ticket"},  # no description
+            json={"affected_system": "Some System", "category": "hardware"},
             headers={"Authorization": f"Bearer {token}"},
         )
     assert response.status_code == 422, (
@@ -324,7 +306,7 @@ async def test_ftc31_ticket_queue_sorted_by_priority_score(technician_user, samp
 async def test_ftc34_resolve_without_summary_returns_422(technician_user, open_ticket):
     """
     FTC-34: PATCH /tickets/{id} with status=resolved but no resolution_summary
-    → 422 Unprocessable Entity. System must reject resolution without a summary.
+    → 422. System must reject resolution without a summary.
     """
     user, token = technician_user
     async with AsyncClient(
@@ -332,7 +314,7 @@ async def test_ftc34_resolve_without_summary_returns_422(technician_user, open_t
     ) as client:
         response = await client.patch(
             f"/api/v1/tickets/{open_ticket.id}",
-            json={"status": "resolved"},  # missing resolution_summary
+            json={"status": "resolved"},
             headers={"Authorization": f"Bearer {token}"},
         )
     assert response.status_code == 422, (
@@ -348,7 +330,7 @@ async def test_ftc34_resolve_without_summary_returns_422(technician_user, open_t
 async def test_ftc35_in_progress_records_timestamp(technician_user, open_ticket):
     """
     FTC-35: PATCH /tickets/{id} with status=in_progress → response includes
-    an updated_at timestamp showing when the technician started work.
+    updated_at timestamp showing when the technician started work.
     """
     user, token = technician_user
     async with AsyncClient(
@@ -378,8 +360,8 @@ async def test_ftc39_category_filter_returns_only_network_tickets(
     technician_user, sample_tickets
 ):
     """
-    FTC-39: GET /tickets?category=network as technician → only Network
-    category tickets are returned in the queue.
+    FTC-39: GET /tickets?category=network → only Network category tickets
+    are returned in the queue.
     """
     user, token = technician_user
     async with AsyncClient(
@@ -418,8 +400,8 @@ async def test_ftc40_ticket_with_attachment_stores_path(end_user):
         response = await client.post(
             "/api/v1/tickets",
             data={
-                "title": "Server crash",
                 "description": "Server crashed, attaching diagnostic log.",
+                "affected_system": "App Server",
                 "category": "software",
             },
             files={"attachment": ("diagnostic.log", fake_file, "text/plain")},
@@ -443,8 +425,7 @@ async def test_ftc45_escalated_filter_returns_only_escalated_tickets(
     technician_user, escalated_tickets
 ):
     """
-    FTC-45: GET /tickets?status=escalated → only tickets with status=escalated
-    are returned. Open or other status tickets must not appear.
+    FTC-45: GET /tickets?status=escalated → only escalated tickets returned.
     """
     user, token = technician_user
     async with AsyncClient(
@@ -474,7 +455,7 @@ async def test_ftc46_claiming_ticket_assigns_to_technician(
     technician_user, open_ticket
 ):
     """
-    FTC-46: POST /tickets/{id}/claim → ticket's assigned_to field is updated
+    FTC-46: POST /tickets/{id}/claim → ticket's assigned_to_id updated
     to the technician's user ID.
     """
     user, token = technician_user
@@ -489,6 +470,7 @@ async def test_ftc46_claiming_ticket_assigns_to_technician(
         f"Expected 200 for ticket claim, got {response.status_code}: {response.text}"
     )
     data = response.json()
-    assert str(data.get("assigned_to")) == str(user.id), (
-        f"Expected assigned_to={user.id}, got {data.get('assigned_to')}"
+    assigned = data.get("assigned_to_id") or data.get("assigned_to")
+    assert str(assigned) == str(user.id), (
+        f"Expected assigned_to_id={user.id}, got {assigned}"
     )
