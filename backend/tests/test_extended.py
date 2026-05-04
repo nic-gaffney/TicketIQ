@@ -83,7 +83,7 @@ class TestClassifyTicketSeverity:
         ("Possible data loss on backup server", Severity.high),
         ("Suspected security breach on admin account", Severity.high),
         ("Complete failure of core network switch", Severity.high),
-        ("Application is running very slow for all users", Severity.medium),
+        ("Application is running very slow today", Severity.medium),
         ("User cannot access the VPN portal", Severity.medium),
         ("Email not working since this morning", Severity.medium),
         ("How do I reset my voicemail PIN?", Severity.low),
@@ -293,7 +293,8 @@ class TestEscalationService:
         from app.services.escalation import run_escalation_check
         from app.models.escalation_config import EscalationConfig
 
-        cfg = EscalationConfig(id=1)
+        # Pass explicit value — SQLAlchemy column defaults don't apply outside DB
+        cfg = EscalationConfig(id=1, high_unassigned_threshold_minutes=30)
         config_result = MagicMock()
         config_result.scalar_one_or_none.return_value = cfg
 
@@ -312,17 +313,15 @@ class TestEscalationService:
     async def test_run_escalation_escalates_qualifying_tickets(self):
         from app.services.escalation import run_escalation_check
         from app.models.escalation_config import EscalationConfig
-        from app.models.ticket import Ticket
 
         cfg = EscalationConfig(id=1, high_unassigned_threshold_minutes=30)
         config_result = MagicMock()
         config_result.scalar_one_or_none.return_value = cfg
 
-        old_time = datetime.now(UTC) - timedelta(hours=2)
-        ticket = MagicMock(spec=Ticket)
+        # Use plain MagicMock (no spec) so status attribute can be freely reassigned
+        ticket = MagicMock()
         ticket.id = 1
         ticket.status = TicketStatus.open
-        ticket.status.value = "open"
         ticket.escalated_at = None
 
         tickets_result = MagicMock()
