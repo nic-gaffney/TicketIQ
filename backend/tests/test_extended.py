@@ -380,7 +380,7 @@ class TestTicketEnums:
 class TestUserRoles:
 
     def test_role_values(self):
-        assert UserRole.end_user == "end_user"
+        assert UserRole.end_user == "user"
         assert UserRole.it_support == "it_support"
         assert UserRole.admin == "admin"
 
