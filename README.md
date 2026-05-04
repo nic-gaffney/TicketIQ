@@ -30,7 +30,7 @@ An AI-powered IT helpdesk ticket management and prioritization system built for 
 | Name | Role |
 |---|---|
 | Dhruv Yadav | Frontend, Backend, AI Classification, Architecture |
-| Nicolas Gaffney | Backend, Escalation Service, CI/CD |
+| Nicolas Gaffney | Deployment, Backend, Escalation Service, CI/CD |
 | Azzam Zahid | Backend Testing, Escalation Tests |
 | Rinin Abraham | Frontend, Backend Testing, Deployment |
 
